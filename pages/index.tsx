@@ -1,0 +1,471 @@
+import { useState, useEffect, useCallback } from "react";
+import useSWR from "swr";
+import {
+  LineChart, Line, BarChart, Bar, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer,
+} from "recharts";
+import { BASELINE, TOP_PRODUCTS, TOP_CITIES, STOCKOUT_MONTHS, MonthRow } from "../lib/baseline";
+import { STATIC_TABS } from "../lib/static-tabs";
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+const fmt = (n: number) =>
+  n >= 1e5 ? `₹${(n / 1e5).toFixed(1)}L` : `₹${Math.round(n).toLocaleString("en-IN")}`;
+const num = (n: number) => Math.round(n).toLocaleString("en-IN");
+const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+const curMonth = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+};
+
+// Months between BASELINE end (2026-05) and current that need backfill
+function missingMonths(): string[] {
+  const baselineEnd = "2026-05";
+  const cur = curMonth();
+  const months: string[] = [];
+  let [y, m] = baselineEnd.split("-").map(Number);
+  m++; if (m > 12) { m = 1; y++; }
+  while (`${y}-${String(m).padStart(2,"0")}` < cur) {
+    months.push(`${y}-${String(m).padStart(2,"0")}`);
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return months;
+}
+
+// ── SWR fetcher ───────────────────────────────────────────────────────────────
+const fetcher = (url: string) => fetch(url).then(r => r.json());
+
+// ── design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  meta: "#2a78d6", google: "#eda100", shopify: "#1baf7a",
+  amazon: "#e34948", ltv: "#4a3aa7", aov: "#eb6834",
+};
+const axStyle = { fontSize: 11, fill: "#898781" };
+const gridColor = "#2c2c2a";
+
+// Live tabs (fetch Windsor) + static tabs (baked in, zero fetch load)
+const LIVE_TABS = ["Channel Trends", "LTV", "Amazon vs Ads", "Products & Cities"];
+const TABS = [...LIVE_TABS, ...STATIC_TABS.map(t => t.label)];
+
+// ── components ────────────────────────────────────────────────────────────────
+function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+  return (
+    <div style={{ background: "var(--surface-1, #161b22)", borderRadius: 10, padding: "12px 16px", border: "0.5px solid var(--border, #21262d)" }}>
+      <div style={{ fontSize: 11, color: "#8b949e", textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 500, color: accent ?? "#fff", marginTop: 3 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function StatusDot({ status }: { status: "loading" | "live" | "error" | "idle" }) {
+  const colors = { loading: "#eda100", live: "#1baf7a", error: "#e34948", idle: "#8b949e" };
+  const labels = { loading: "Fetching…", live: "Live", error: "Fetch error", idle: "Baseline only" };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: colors[status], background: "#161b22", border: `0.5px solid ${colors[status]}40`, borderRadius: 6, padding: "3px 9px" }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: colors[status] }} />
+      {labels[status]}
+    </span>
+  );
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: "#161b22", border: "0.5px solid #30363d", borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
+      <div style={{ fontWeight: 500, marginBottom: 5, color: "#c9d1d9" }}>{label}</div>
+      {payload.map((p: any, i: number) => (
+        <div key={i} style={{ color: "#8b949e", display: "flex", gap: 8, marginBottom: 2 }}>
+          <span style={{ color: p.color }}>■</span>
+          <span>{p.name}:</span>
+          <span style={{ color: "#c9d1d9", fontWeight: 500 }}>
+            {typeof p.value === "number" && p.value > 999 ? fmt(p.value) : typeof p.value === "number" ? p.value.toFixed(3) : p.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+function ChartCard({ title, accent, children }: { title: string; accent?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px 14px 8px" }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: accent ?? "#8b949e", marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+// Static tab: renders baked-in HTML in an isolated iframe. Only mounts when its
+// tab is active, so it adds zero load to the live dashboard until clicked.
+function StaticTabFrame({ html, note }: { html: string; note: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "#8b949e", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#8b949e", display: "inline-block" }} />
+        {note}
+      </div>
+      <iframe
+        srcDoc={html}
+        style={{ width: "100%", height: "calc(100vh - 220px)", minHeight: 600, border: "0.5px solid #21262d", borderRadius: 10, background: "#0d1117" }}
+        title="static-analysis"
+      />
+    </div>
+  );
+}
+
+// ── main page ─────────────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const [tab, setTab] = useState(0);
+  const [liveRows, setLiveRows] = useState<Record<string, MonthRow>>({});
+  const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "live" | "error">("loading");
+  const [lastFetched, setLastFetched] = useState<string>("");
+
+  // SWR for current month
+  const cm = curMonth();
+  const { data: curData, error: curError, mutate: curMutate } = useSWR(
+    `/api/windsor?month=${cm}`,
+    fetcher,
+    { revalidateOnFocus: false, dedupingInterval: 3600000 }
+  );
+
+  // On mount, backfill any months between baseline end and current
+  useEffect(() => {
+    const missing = missingMonths();
+    if (missing.length === 0) return;
+    const from = missing[0];
+    const to   = missing[missing.length - 1];
+    fetch(`/api/history?from=${from}&to=${to}`)
+      .then(r => r.json())
+      .then(json => {
+        if (json.ok && Array.isArray(json.data)) {
+          const map: Record<string, MonthRow> = {};
+          json.data.forEach((row: any) => {
+            if (row.month && !row.error) map[row.month] = row as MonthRow;
+          });
+          setLiveRows(prev => ({ ...prev, ...map }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Merge current month data
+  useEffect(() => {
+    if (curData?.ok && curData.data) {
+      setLiveRows(prev => ({ ...prev, [cm]: curData.data as MonthRow }));
+      setFetchStatus("live");
+      setLastFetched(new Date().toLocaleTimeString());
+    } else if (curError) {
+      setFetchStatus("error");
+    }
+  }, [curData, curError, cm]);
+
+  const refresh = useCallback(async () => {
+    setFetchStatus("loading");
+    await curMutate();
+  }, [curMutate]);
+
+  // Merge baseline + live
+  const allRows: MonthRow[] = (() => {
+    const map: Record<string, MonthRow> = {};
+    BASELINE.forEach(r => { map[r.month] = r; });
+    Object.entries(liveRows).forEach(([m, r]) => { map[m] = r; });
+    return Object.values(map)
+      .filter(r => r.buyers > 0 || r.amazon_sales > 0 || r.meta_spend > 0)
+      .sort((a, b) => a.month.localeCompare(b.month));
+  })();
+
+  const latestRow = allRows[allRows.length - 1] ?? ({} as MonthRow);
+  const totalRev  = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
+  const totalSpend= allRows.reduce((s, r) => s + (r.ad_spend    ?? 0), 0);
+
+  return (
+    <div style={{ background: "#0d1117", minHeight: "100vh", color: "#c9d1d9", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", paddingBottom: 48 }}>
+
+      {/* Header */}
+      <div style={{ background: "#0a0d12", borderBottom: "1px solid #21262d", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, position: "sticky", top: 0, zIndex: 100 }}>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 600, color: "#fff" }}>Heatronics — Performance Dashboard</div>
+          <div style={{ fontSize: 11, color: "#8b949e", marginTop: 2 }}>Digistex · Meta + Google + Shopify + Amazon · Aug 2025 → live</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <StatusDot status={fetchStatus} />
+          {fetchStatus === "live" && <span style={{ fontSize: 11, color: "#8b949e" }}>Updated {lastFetched}</span>}
+          <button
+            onClick={refresh}
+            disabled={fetchStatus === "loading"}
+            style={{ fontSize: 12, padding: "5px 14px", cursor: fetchStatus === "loading" ? "wait" : "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
+          >
+            {fetchStatus === "loading" ? "Fetching…" : "↻ Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, padding: "20px 24px 8px" }}>
+        <KpiCard label="Total Shopify revenue" value={fmt(totalRev)} sub={`${allRows.length} months`} />
+        <KpiCard label="Total ad spend" value={fmt(totalSpend)} sub="Meta + Google" />
+        <KpiCard label={`Latest buyers (${latestRow.month ?? "—"})`} value={num(latestRow.buyers ?? 0)} sub={`AOV ${fmt(latestRow.aov ?? 0)}`} />
+        <KpiCard label="Latest hist LTV" value={fmt(latestRow.hist_ltv ?? 0)} sub={`${pct(latestRow.repeat_rate ?? 0)} repeat`} />
+        <KpiCard label="Amazon" value={fmt(latestRow.amazon_sales ?? 0)} sub={`${latestRow.month ?? "—"} · ${num(latestRow.amazon_units ?? 0)} units`} accent={C.amazon} />
+        <KpiCard label="Live months" value={String(Object.keys(liveRows).length)} sub={fetchStatus === "live" ? "from Windsor.ai" : "pending"} accent={fetchStatus === "live" ? C.shopify : "#eda100"} />
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 2, padding: "16px 24px 0", borderBottom: "1px solid #21262d" }}>
+        {TABS.map((t, i) => (
+          <button key={i} onClick={() => setTab(i)} style={{ padding: "7px 16px", fontSize: 13, fontWeight: tab === i ? 500 : 400, color: tab === i ? "#ff6b35" : "#8b949e", background: "transparent", border: "none", borderBottom: tab === i ? "2px solid #ff6b35" : "2px solid transparent", cursor: "pointer" }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: 24 }}>
+
+        {/* ── TAB 0: Channel Trends ── */}
+        {tab === 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <ChartCard title="Ad spend (Meta + Google) vs Shopify revenue" accent={C.aov}>
+              <div style={{ height: 300 }}>
+                <ResponsiveContainer>
+                  <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                    <YAxis yAxisId="l" tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                    <YAxis yAxisId="r" orientation="right" tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar yAxisId="l" dataKey="ad_spend" name="Ad spend" fill={C.meta} opacity={0.65} radius={[3, 3, 0, 0]} />
+                    <Line yAxisId="r" type="monotone" dataKey="shopify_rev" name="Shopify rev" stroke={C.shopify} strokeWidth={2.5} dot={{ r: 3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </ChartCard>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <ChartCard title="Meta vs Google spend" accent={C.meta}>
+                <div style={{ height: 240 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="meta_spend" name="Meta" stackId="a" fill={C.meta} />
+                      <Bar dataKey="google_spend" name="Google" stackId="a" fill={C.google} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartCard>
+
+              <ChartCard title="Shopify buyers per month" accent={C.shopify}>
+                <div style={{ height: 240 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="buyers" name="Buyers" fill={C.shopify} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartCard>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 1: LTV ── */}
+        {tab === 1 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <ChartCard title="Historical LTV per buyer & AOV" accent={C.ltv}>
+              <div style={{ height: 280 }}>
+                <ResponsiveContainer>
+                  <LineChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                    <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="hist_ltv" name="Hist LTV" stroke={C.ltv} strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="aov" name="AOV" stroke={C.aov} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </ChartCard>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <ChartCard title="Repeat rate % by cohort" accent={C.shopify}>
+                <div style={{ height: 240 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} tickFormatter={v => `${(v * 100).toFixed(0)}%`} />
+                      <Tooltip content={<CustomTooltip />} formatter={(v: number) => `${(v * 100).toFixed(1)}%`} />
+                      <Bar dataKey="repeat_rate" name="Repeat rate" fill={C.shopify} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartCard>
+
+              {/* LTV table */}
+              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "14px", overflowX: "auto" }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 8 }}>Monthly LTV table</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      {["Month", "Buyers", "Revenue", "AOV", "Hist LTV", "Rep%"].map(h => (
+                        <th key={h} style={{ padding: "4px 6px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allRows.slice(-10).map(r => (
+                      <tr key={r.month} style={{ borderBottom: "0.5px solid #21262d" }}>
+                        <td style={{ padding: "4px 6px", color: "#8b949e" }}>{r.month}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{num(r.buyers)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.revenue)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.aov)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: r.hist_ltv > 1800 ? C.shopify : r.hist_ltv < 1600 ? C.amazon : "#c9d1d9" }}>{fmt(r.hist_ltv)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", color: r.repeat_rate > 0.12 ? C.shopify : r.repeat_rate < 0.06 ? C.amazon : "#c9d1d9" }}>{pct(r.repeat_rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 2: Amazon vs Ads ── */}
+        {tab === 2 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#161b22", border: "0.5px solid #eda10040", borderLeft: "3px solid #eda100", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#8b949e" }}>
+              <strong style={{ color: "#c9d1d9" }}>No halo effect from ads → Amazon.</strong> Correlation r ≈ −0.7 (opposite directions). Spend drives Shopify (own site) not Amazon (reseller). Jan–Feb 2026 Amazon shows a stockout cliff ⚠ — not an ad effect.
+            </div>
+
+            <ChartCard title="Amazon sales vs total ad spend & Shopify" accent={C.amazon}>
+              <div style={{ height: 310 }}>
+                <ResponsiveContainer>
+                  <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                    <YAxis yAxisId="l" tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                    <YAxis yAxisId="r" orientation="right" tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Bar yAxisId="l" dataKey="ad_spend" name="Ad spend" fill={C.meta} opacity={0.55} radius={[3, 3, 0, 0]} />
+                    <Line yAxisId="r" type="monotone" dataKey="amazon_sales" name="Amazon" stroke={C.amazon} strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line yAxisId="r" type="monotone" dataKey="shopify_rev" name="Shopify" stroke={C.shopify} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </ChartCard>
+
+            <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "12px 16px", overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr>
+                    {["Month", "Amazon ₹", "Units", "Meta ₹", "Google ₹", "Ad total ₹", "Shopify ₹"].map(h => (
+                      <th key={h} style={{ padding: "4px 8px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {allRows.slice(-10).map(r => (
+                    <tr key={r.month} style={{ borderBottom: "0.5px solid #21262d" }}>
+                      <td style={{ padding: "4px 8px", color: "#8b949e" }}>
+                        {r.month}
+                        {STOCKOUT_MONTHS.includes(r.month) && <span style={{ color: "#eda100", marginLeft: 3 }}>⚠</span>}
+                      </td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(r.amazon_sales)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{r.amazon_units ? num(r.amazon_units) : "—"}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(r.meta_spend)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(r.google_spend)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(r.ad_spend)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(r.shopify_rev)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 3: Products & Cities ── */}
+        {tab === 3 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 12 }}>Top products by units (Aug 2025 – May 2026)</div>
+                {TOP_PRODUCTS.map((p, i) => {
+                  const max = TOP_PRODUCTS[0].units;
+                  return (
+                    <div key={i} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                        <span style={{ color: "#8b949e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "74%" }}>{p.product}</span>
+                        <span style={{ color: "#c9d1d9", fontWeight: 500 }}>{num(p.units)}</span>
+                      </div>
+                      <div style={{ height: 3, background: "#0d1117", borderRadius: 2 }}>
+                        <div style={{ height: 3, width: `${(p.units / max) * 100}%`, background: C.meta, borderRadius: 2 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 12 }}>Top cities by revenue</div>
+                {TOP_CITIES.map((c, i) => {
+                  const max = TOP_CITIES[0].revenue;
+                  return (
+                    <div key={i} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                        <span style={{ color: "#8b949e" }}>{c.city}</span>
+                        <span style={{ color: "#c9d1d9", fontWeight: 500 }}>{fmt(c.revenue)}</span>
+                      </div>
+                      <div style={{ height: 3, background: "#0d1117", borderRadius: 2 }}>
+                        <div style={{ height: 3, width: `${(c.revenue / max) * 100}%`, background: C.shopify, borderRadius: 2 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <ChartCard title="Avg products & units per customer (monthly cohorts)" accent="#8b949e">
+              <div style={{ height: 220 }}>
+                <ResponsiveContainer>
+                  <LineChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                    <YAxis domain={[1, 1.4]} tick={axStyle} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="avg_products" name="Avg products/customer" stroke={C.meta} strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="avg_units" name="Avg units/customer" stroke={C.aov} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </ChartCard>
+          </div>
+        )}
+
+        {/* ── STATIC TABS (baked in, no live fetch) ── */}
+        {tab >= LIVE_TABS.length && (() => {
+          const st = STATIC_TABS[tab - LIVE_TABS.length];
+          return st ? <StaticTabFrame html={st.html} note={st.note} /> : null;
+        })()}
+
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: "0 24px", fontSize: 11, color: "#484f58", borderTop: "1px solid #21262d", paddingTop: 14, marginTop: 8 }}>
+        Heatronics · Windsor.ai (Meta 2294012640954204 · Google 492-700-2413 · Shopify heatronicss.myshopify.com · Amazon AD0TBAKEOUYFH-IN) · Baseline Aug 2025–May 2026 baked in · Live fetch via /api/windsor · Digistex
+      </div>
+    </div>
+  );
+}
