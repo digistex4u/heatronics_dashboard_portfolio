@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import useSWR from "swr";
+import * as XLSX from "xlsx";
 import {
   LineChart, Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -88,10 +89,45 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-function ChartCard({ title, accent, children }: { title: string; accent?: string; children: React.ReactNode }) {
+// Export any array of row objects to a downloadable .xlsx file.
+function exportToExcel(rows: Record<string, any>[], filename: string, sheetName = "Data") {
+  if (!rows || rows.length === 0) return;
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  const stamp = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `${filename}_${stamp}.xlsx`);
+}
+
+function ChartCard({
+  title, accent, children, data, filename,
+}: {
+  title: string;
+  accent?: string;
+  children: React.ReactNode;
+  data?: Record<string, any>[];
+  filename?: string;
+}) {
   return (
     <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px 14px 8px" }}>
-      <div style={{ fontSize: 12, fontWeight: 500, color: accent ?? "#8b949e", marginBottom: 10 }}>{title}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
+        {data && filename && (
+          <button
+            onClick={() => exportToExcel(data, filename, title)}
+            title="Download this chart's data as Excel"
+            style={{
+              fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6,
+              border: "1px solid #30363d", background: "transparent", color: "#8b949e",
+              display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#c9d1d9"; e.currentTarget.style.borderColor = "#484f58"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#8b949e"; e.currentTarget.style.borderColor = "#30363d"; }}
+          >
+            ⤓ Excel
+          </button>
+        )}
+        <div style={{ fontSize: 12, fontWeight: 500, color: accent ?? "#8b949e", textAlign: "right", flex: 1 }}>{title}</div>
+      </div>
       {children}
     </div>
   );
@@ -193,6 +229,19 @@ export default function Dashboard() {
           <StatusDot status={fetchStatus} />
           {fetchStatus === "live" && <span style={{ fontSize: 11, color: "#8b949e" }}>Updated {lastFetched}</span>}
           <button
+            onClick={() => {
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Revenue: r.revenue, Orders: r.orders, AOV: r.aov, "Hist LTV": r.hist_ltv, "Repeat Rate %": (r.repeat_rate*100).toFixed(1), "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units }))), "All Months");
+              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(TOP_PRODUCTS.map(p => ({ Product: p.product, Units: p.units }))), "Top Products");
+              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(TOP_CITIES.map(c => ({ City: c.city, Revenue: c.revenue }))), "Top Cities");
+              XLSX.writeFile(wb, `heatronics_dashboard_${new Date().toISOString().slice(0,10)}.xlsx`);
+            }}
+            title="Download all dashboard data as one Excel workbook"
+            style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
+          >
+            ⤓ Download all (Excel)
+          </button>
+          <button
             onClick={refresh}
             disabled={fetchStatus === "loading"}
             style={{ fontSize: 12, padding: "5px 14px", cursor: fetchStatus === "loading" ? "wait" : "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
@@ -226,7 +275,7 @@ export default function Dashboard() {
         {/* ── TAB 0: Channel Trends ── */}
         {tab === 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <ChartCard title="Ad spend (Meta + Google) vs Shopify revenue" accent={C.aov}>
+            <ChartCard title="Ad spend (Meta + Google) vs Shopify revenue" accent={C.aov} filename="channel_spend_vs_shopify" data={allRows.map(r => ({ Month: r.month, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev }))}>
               <div style={{ height: 300 }}>
                 <ResponsiveContainer>
                   <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
@@ -244,7 +293,7 @@ export default function Dashboard() {
             </ChartCard>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <ChartCard title="Meta vs Google spend" accent={C.meta}>
+              <ChartCard title="Meta vs Google spend" accent={C.meta} filename="meta_vs_google_spend" data={allRows.map(r => ({ Month: r.month, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend }))}>
                 <div style={{ height: 240 }}>
                   <ResponsiveContainer>
                     <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
@@ -260,7 +309,7 @@ export default function Dashboard() {
                 </div>
               </ChartCard>
 
-              <ChartCard title="Shopify buyers per month" accent={C.shopify}>
+              <ChartCard title="Shopify buyers per month" accent={C.shopify} filename="shopify_buyers" data={allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Orders: r.orders, Revenue: r.revenue }))}>
                 <div style={{ height: 240 }}>
                   <ResponsiveContainer>
                     <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
@@ -280,7 +329,7 @@ export default function Dashboard() {
         {/* ── TAB 1: LTV ── */}
         {tab === 1 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <ChartCard title="Historical LTV per buyer & AOV" accent={C.ltv}>
+            <ChartCard title="Historical LTV per buyer & AOV" accent={C.ltv} filename="ltv_and_aov" data={allRows.map(r => ({ Month: r.month, "Hist LTV": r.hist_ltv, AOV: r.aov, Buyers: r.buyers, "Repeat Rate %": (r.repeat_rate*100).toFixed(1) }))}>
               <div style={{ height: 280 }}>
                 <ResponsiveContainer>
                   <LineChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
@@ -297,7 +346,7 @@ export default function Dashboard() {
             </ChartCard>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <ChartCard title="Repeat rate % by cohort" accent={C.shopify}>
+              <ChartCard title="Repeat rate % by cohort" accent={C.shopify} filename="repeat_rate_by_cohort" data={allRows.map(r => ({ Month: r.month, "Repeat Rate %": (r.repeat_rate*100).toFixed(1), Buyers: r.buyers }))}>
                 <div style={{ height: 240 }}>
                   <ResponsiveContainer>
                     <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
@@ -313,7 +362,14 @@ export default function Dashboard() {
 
               {/* LTV table */}
               <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "14px", overflowX: "auto" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 8 }}>Monthly LTV table</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+                  <button
+                    onClick={() => exportToExcel(allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Revenue: r.revenue, AOV: r.aov, "Hist LTV": r.hist_ltv, "Repeat Rate %": (r.repeat_rate*100).toFixed(1) })), "monthly_ltv_table", "Monthly LTV")}
+                    title="Download full LTV table as Excel"
+                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                  >⤓ Excel</button>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Monthly LTV table</div>
+                </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
                     <tr>
@@ -347,7 +403,7 @@ export default function Dashboard() {
               <strong style={{ color: "#c9d1d9" }}>No halo effect from ads → Amazon.</strong> Correlation r ≈ −0.7 (opposite directions). Spend drives Shopify (own site) not Amazon (reseller). Jan–Feb 2026 Amazon shows a stockout cliff ⚠ — not an ad effect.
             </div>
 
-            <ChartCard title="Amazon sales vs total ad spend & Shopify" accent={C.amazon}>
+            <ChartCard title="Amazon sales vs total ad spend & Shopify" accent={C.amazon} filename="amazon_vs_ads" data={allRows.map(r => ({ Month: r.month, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev }))}>
               <div style={{ height: 310 }}>
                 <ResponsiveContainer>
                   <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
@@ -366,6 +422,13 @@ export default function Dashboard() {
             </ChartCard>
 
             <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "12px 16px", overflowX: "auto" }}>
+              <div style={{ marginBottom: 8 }}>
+                <button
+                  onClick={() => exportToExcel(allRows.map(r => ({ Month: r.month, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev, Stockout: STOCKOUT_MONTHS.includes(r.month) ? "YES" : "" })), "amazon_vs_ads_table", "Amazon vs Ads")}
+                  title="Download full Amazon vs Ads table as Excel"
+                  style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                >⤓ Excel</button>
+              </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
                   <tr>
@@ -400,7 +463,14 @@ export default function Dashboard() {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 12 }}>Top products by units (Aug 2025 – May 2026)</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8 }}>
+                  <button
+                    onClick={() => exportToExcel(TOP_PRODUCTS.map(p => ({ Product: p.product, Units: p.units })), "top_products", "Top Products")}
+                    title="Download top products as Excel"
+                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                  >⤓ Excel</button>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Top products by units (Aug 2025 – May 2026)</div>
+                </div>
                 {TOP_PRODUCTS.map((p, i) => {
                   const max = TOP_PRODUCTS[0].units;
                   return (
@@ -418,7 +488,14 @@ export default function Dashboard() {
               </div>
 
               <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 12 }}>Top cities by revenue</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8 }}>
+                  <button
+                    onClick={() => exportToExcel(TOP_CITIES.map(c => ({ City: c.city, Revenue: c.revenue })), "top_cities", "Top Cities")}
+                    title="Download top cities as Excel"
+                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                  >⤓ Excel</button>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Top cities by revenue</div>
+                </div>
                 {TOP_CITIES.map((c, i) => {
                   const max = TOP_CITIES[0].revenue;
                   return (
@@ -436,7 +513,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <ChartCard title="Avg products & units per customer (monthly cohorts)" accent="#8b949e">
+            <ChartCard title="Avg products & units per customer (monthly cohorts)" accent="#8b949e" filename="avg_products_units" data={allRows.map(r => ({ Month: r.month, "Avg Products/Customer": r.avg_products, "Avg Units/Customer": r.avg_units }))}>
               <div style={{ height: 220 }}>
                 <ResponsiveContainer>
                   <LineChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
