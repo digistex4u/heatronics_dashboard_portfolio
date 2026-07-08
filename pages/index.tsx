@@ -231,15 +231,26 @@ export default function Dashboard() {
           <button
             onClick={() => {
               const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Revenue: r.revenue, Orders: r.orders, AOV: r.aov, "Hist LTV": r.hist_ltv, "Repeat Rate %": (r.repeat_rate*100).toFixed(1), "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units }))), "All Months");
-              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(TOP_PRODUCTS.map(p => ({ Product: p.product, Units: p.units }))), "Top Products");
-              XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(TOP_CITIES.map(c => ({ City: c.city, Revenue: c.revenue }))), "Top Cities");
-              XLSX.writeFile(wb, `heatronics_dashboard_${new Date().toISOString().slice(0,10)}.xlsx`);
+              const add = (rows: Record<string, any>[], sheet: string) =>
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheet.slice(0, 31));
+
+              // One sheet per chart / table
+              add(allRows.map(r => ({ Month: r.month, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev })), "Spend vs Shopify");
+              add(allRows.map(r => ({ Month: r.month, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend })), "Meta vs Google");
+              add(allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Orders: r.orders, Revenue: r.revenue })), "Shopify Buyers");
+              add(allRows.map(r => ({ Month: r.month, "Hist LTV": r.hist_ltv, AOV: r.aov, Buyers: r.buyers, "Repeat Rate %": (r.repeat_rate * 100).toFixed(1) })), "LTV and AOV");
+              add(allRows.map(r => ({ Month: r.month, "Repeat Rate %": (r.repeat_rate * 100).toFixed(1), Buyers: r.buyers })), "Repeat Rate");
+              add(allRows.map(r => ({ Month: r.month, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev, Stockout: STOCKOUT_MONTHS.includes(r.month) ? "YES" : "" })), "Amazon vs Ads");
+              add(allRows.map(r => ({ Month: r.month, "Avg Products/Customer": r.avg_products, "Avg Units/Customer": r.avg_units })), "Avg Products & Units");
+              add(TOP_PRODUCTS.map(p => ({ Product: p.product, Units: p.units })), "Top Products");
+              add(TOP_CITIES.map(c => ({ City: c.city, Revenue: c.revenue })), "Top Cities");
+
+              XLSX.writeFile(wb, `heatronics_dashboard_${new Date().toISOString().slice(0, 10)}.xlsx`);
             }}
-            title="Download all dashboard data as one Excel workbook"
-            style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
+            title="Download every chart's data — one sheet per chart"
+            style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #ff6b35", background: "#ff6b35", color: "#fff", fontWeight: 500 }}
           >
-            ⤓ Download all (Excel)
+            ⤓ Download all charts (Excel)
           </button>
           <button
             onClick={refresh}
