@@ -145,7 +145,7 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
       return await windsorFetch(
         "shopify",
         ACCOUNTS.shopify,
-        ["order_id", "order_total_price", "order_net_sales"],
+        ["order_id", "order_total_price"],
         from,
         to,
         undefined,
@@ -158,38 +158,22 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
   };
   const [o1, o2] = await Promise.all([fetchOrders(dateFrom, mid), fetchOrders(secondFrom, dateTo)]);
 
-  const byOrder = new Map<string, { total: number; net: number }>();
+  const byOrder = new Map<string, number>();
   for (const r of [...o1, ...o2]) {
     const id = String(r.order_id ?? "");
     if (!id) continue;
-    byOrder.set(id, { total: Number(r.order_total_price) || 0, net: Number(r.order_net_sales) || 0 });
+    byOrder.set(id, Number(r.order_total_price) || 0);
   }
-  let totalSales = 0;    // Shopify "Total sales" (incl tax/shipping, net of returns)
+  let totalSales = 0;
   let orderCount = 0;
-  // Net/total ratio is measured ONLY over clean paid orders (total>0 && net>0).
-  // Voided/refunded orders set total_price to 0 while net_sales can stay positive,
-  // which would otherwise push the ratio above 1 and corrupt LTV.
-  let ratioTotal = 0;
-  let ratioNet = 0;
-  byOrder.forEach((v) => {
-    totalSales += v.total;
-    if (v.total > 0) {
-      orderCount++;
-      if (v.net > 0) { ratioTotal += v.total; ratioNet += v.net; }
-    }
-  });
-
-  // RULE: revenue + AOV are on Total sales; LTV (value-per-buyer) is on NET sales.
-  // No customer-level net field exists, so scale cohort lifetime spend by the
-  // store's net/total ratio (tax+shipping share; stable ~0.95 across paid orders).
-  const netRatio = ratioTotal > 0 ? ratioNet / ratioTotal : 1;
+  byOrder.forEach((v) => { totalSales += v; if (v > 0) orderCount++; });
 
   return {
     buyers:      nb,
-    orders:      orderCount,                                              // paid orders in period
-    revenue:     Math.round(totalSales),                                  // Total sales
-    aov:         orderCount > 0 ? Math.round(totalSales / orderCount) : 0, // Total-sales AOV
-    hist_ltv:    nb > 0 ? Math.round((cohortRevenue / nb) * netRatio) : 0, // NET LTV/buyer
+    orders:      orderCount,                                   // paid orders in period
+    revenue:     Math.round(totalSales),                       // Shopify Total sales
+    aov:         orderCount > 0 ? Math.round(totalSales / orderCount) : 0,
+    hist_ltv:    nb > 0 ? Math.round(cohortRevenue / nb) : 0,  // cohort LTV/buyer
     repeat_rate: nb > 0 ? Math.round((cohortBuyers.filter(r => Number(r.customer_orders_count) > 1).length / nb) * 1000) / 1000 : 0,
   };
 }
