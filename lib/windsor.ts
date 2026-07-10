@@ -115,9 +115,9 @@ export async function fetchGoogle(dateFrom: string, dateTo: string) {
 
 // ── Shopify ───────────────────────────────────────────────────────────────────
 export async function fetchShopify(dateFrom: string, dateTo: string) {
-  // date_filters pins the Shopify date column to customer createdAt (acquisition cohort),
-  // matching the earlier LTV analysis.
-  const rows = await windsorFetch(
+  // ── Acquisition cohort (customers created in the period) ──
+  // Drives buyers, historical LTV/buyer and repeat rate — acquisition metrics only.
+  const cohortRows = await windsorFetch(
     "shopify",
     ACCOUNTS.shopify,
     ["customer_id", "customer_orders_count", "customer_total_spent"],
@@ -126,20 +126,55 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
     undefined,
     { date_filters: JSON.stringify({ customers: "createdAt" }) }
   );
+  const cohortBuyers = cohortRows.filter(r => Number(r.customer_orders_count) > 0 && Number(r.customer_total_spent) > 0);
+  const cohortRevenue = sum(cohortBuyers, "customer_total_spent");
+  const nb = cohortBuyers.length;
 
-  // Filter to actual buyers only
-  const buyers = rows.filter(r => Number(r.customer_orders_count) > 0 && Number(r.customer_total_spent) > 0);
-  const revenue = sum(buyers, "customer_total_spent");
-  const orders  = sum(buyers, "customer_orders_count");
-  const nb      = buyers.length;
+  // ── Period Total sales (Shopify "Total sales") ──
+  // order_total_price = current total after returns, incl. taxes/discounts/shipping.
+  // The account-level SUM is broken by a line-item join, so we aggregate at ORDER
+  // grain (one row per order_id), pinned to order createdAt, split into halves and
+  // de-duplicated. Voided/refunded-to-zero orders net out and are excluded from AOV.
+  const midDate = new Date(dateFrom);
+  midDate.setDate(midDate.getDate() + 14);
+  const mid = midDate.toISOString().split("T")[0];
+  const secondFrom = new Date(new Date(mid).getTime() + 86400000).toISOString().split("T")[0];
+
+  const fetchOrders = async (from: string, to: string) => {
+    try {
+      return await windsorFetch(
+        "shopify",
+        ACCOUNTS.shopify,
+        ["order_id", "order_total_price"],
+        from,
+        to,
+        undefined,
+        { date_filters: JSON.stringify({ orders: "createdAt" }) },
+        60000
+      );
+    } catch {
+      return [];
+    }
+  };
+  const [o1, o2] = await Promise.all([fetchOrders(dateFrom, mid), fetchOrders(secondFrom, dateTo)]);
+
+  const byOrder = new Map<string, number>();
+  for (const r of [...o1, ...o2]) {
+    const id = String(r.order_id ?? "");
+    if (!id) continue;
+    byOrder.set(id, Number(r.order_total_price) || 0);
+  }
+  let totalSales = 0;
+  let orderCount = 0;
+  byOrder.forEach((v) => { totalSales += v; if (v > 0) orderCount++; });
 
   return {
     buyers:      nb,
-    orders:      Math.round(orders),
-    revenue:     Math.round(revenue),
-    aov:         orders > 0 ? Math.round(revenue / orders) : 0,
-    hist_ltv:    nb > 0     ? Math.round(revenue / nb)     : 0,
-    repeat_rate: nb > 0     ? Math.round((buyers.filter(r => Number(r.customer_orders_count) > 1).length / nb) * 1000) / 1000 : 0,
+    orders:      orderCount,                                   // paid orders in period
+    revenue:     Math.round(totalSales),                       // Shopify Total sales
+    aov:         orderCount > 0 ? Math.round(totalSales / orderCount) : 0,
+    hist_ltv:    nb > 0 ? Math.round(cohortRevenue / nb) : 0,  // cohort LTV/buyer
+    repeat_rate: nb > 0 ? Math.round((cohortBuyers.filter(r => Number(r.customer_orders_count) > 1).length / nb) * 1000) / 1000 : 0,
   };
 }
 
@@ -293,6 +328,7 @@ export async function fetchMonthSnapshot(yearMonth: string, opts: { amazonAdsTim
     google_spend: g.spend,
     ad_spend:    m.spend + g.spend,
     shopify_rev: sh.revenue,
+    revenue:     sh.revenue,
     buyers:      sh.buyers,
     orders:      sh.orders,
     aov:         sh.aov,
