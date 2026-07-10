@@ -131,6 +131,73 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
   };
 }
 
+
+// ── Amazon Ads (Sponsored Products + Brands + Display) ────────────────────────
+export async function fetchAmazonAds(dateFrom: string, dateTo: string) {
+  // Sponsored Products — campaign level
+  const spRows = await windsorFetch(
+    "amazon_ads", ACCOUNTS.amazon_ads,
+    ["sponsored_products_campaign__spend", "sponsored_products_campaign__attributedsales14d",
+     "sponsored_products_campaign__clicks", "sponsored_products_campaign__impressions"],
+    dateFrom, dateTo
+  );
+
+  // Sponsored Brands (non-video) — campaign level
+  const sbRows = await windsorFetch(
+    "amazon_ads", ACCOUNTS.amazon_ads,
+    ["sponsored_brands_campaign_non_video__spend", "sponsored_brands_campaign_non_video__attributedsales14d",
+     "sponsored_brands_campaign_non_video__clicks", "sponsored_brands_campaign_non_video__impressions"],
+    dateFrom, dateTo
+  );
+
+  // Sponsored Brands Video — campaign level
+  const sbvRows = await windsorFetch(
+    "amazon_ads", ACCOUNTS.amazon_ads,
+    ["sponsored_brands_campaign_video__spend", "sponsored_brands_campaign_video__sales",
+     "sponsored_brands_campaign_video__clicks", "sponsored_brands_campaign_video__impressions"],
+    dateFrom, dateTo
+  );
+
+  // Sponsored Display — campaign level
+  const sdRows = await windsorFetch(
+    "amazon_ads", ACCOUNTS.amazon_ads,
+    ["sponsored_display_campaign__cost", "sponsored_display_campaign__sales",
+     "sponsored_display_campaign__clicks", "sponsored_display_campaign__impressions"],
+    dateFrom, dateTo
+  );
+
+  const spSpend = sum(spRows, "sponsored_products_campaign__spend");
+  const sbSpend = sum(sbRows, "sponsored_brands_campaign_non_video__spend");
+  const sbvSpend = sum(sbvRows, "sponsored_brands_campaign_video__spend");
+  const sdSpend = sum(sdRows, "sponsored_display_campaign__cost");
+
+  const spSales = sum(spRows, "sponsored_products_campaign__attributedsales14d");
+  const sbSales = sum(sbRows, "sponsored_brands_campaign_non_video__attributedsales14d");
+  const sbvSales = sum(sbvRows, "sponsored_brands_campaign_video__sales");
+  const sdSales = sum(sdRows, "sponsored_display_campaign__sales");
+
+  const spClicks = sum(spRows, "sponsored_products_campaign__clicks");
+  const sbClicks = sum(sbRows, "sponsored_brands_campaign_non_video__clicks");
+  const sbvClicks = sum(sbvRows, "sponsored_brands_campaign_video__clicks");
+  const sdClicks = sum(sdRows, "sponsored_display_campaign__clicks");
+
+  const spImpr = sum(spRows, "sponsored_products_campaign__impressions");
+  const sbImpr = sum(sbRows, "sponsored_brands_campaign_non_video__impressions");
+  const sbvImpr = sum(sbvRows, "sponsored_brands_campaign_video__impressions");
+  const sdImpr = sum(sdRows, "sponsored_display_campaign__impressions");
+
+  return {
+    spend: Math.round(spSpend + sbSpend + sbvSpend + sdSpend),
+    sales: Math.round(spSales + sbSales + sbvSales + sdSales),
+    clicks: Math.round(spClicks + sbClicks + sbvClicks + sdClicks),
+    impressions: Math.round(spImpr + sbImpr + sbvImpr + sdImpr),
+    // Breakdown by ad type
+    sp_spend: Math.round(spSpend), sp_sales: Math.round(spSales),
+    sb_spend: Math.round(sbSpend + sbvSpend), sb_sales: Math.round(sbSales + sbvSales),
+    sd_spend: Math.round(sdSpend), sd_sales: Math.round(sdSales),
+  };
+}
+
 // ── Amazon SP ─────────────────────────────────────────────────────────────────
 // Amazon SP times out on full months — use two 15-day halves and merge.
 export async function fetchAmazon(dateFrom: string, dateTo: string) {
@@ -178,11 +245,12 @@ export async function fetchMonthSnapshot(yearMonth: string) {
   const lastDay = new Date(year, month, 0).getDate();
   const dateTo  = `${yearMonth}-${String(lastDay).padStart(2, "0")}`;
 
-  const [meta, google, shopify, amazon] = await Promise.allSettled([
+  const [meta, google, shopify, amazon, amazonAds] = await Promise.allSettled([
     fetchMeta(dateFrom, dateTo),
     fetchGoogle(dateFrom, dateTo),
     fetchShopify(dateFrom, dateTo),
     fetchAmazon(dateFrom, dateTo),
+    fetchAmazonAds(dateFrom, dateTo),
   ]);
 
   const m  = meta.status     === "fulfilled" ? meta.value     : { spend: 0, purchases: 0, revenue: 0 };
@@ -203,6 +271,17 @@ export async function fetchMonthSnapshot(yearMonth: string) {
     repeat_rate: sh.repeat_rate,
     amazon_sales: az.sales,
     amazon_units: az.units,
+    // Amazon Ads
+    amazon_ads_spend: azAds.spend,
+    amazon_ads_sales: azAds.sales,
+    amazon_ads_clicks: azAds.clicks,
+    amazon_ads_impressions: azAds.impressions,
+    amazon_ads_sp_spend: azAds.sp_spend,
+    amazon_ads_sp_sales: azAds.sp_sales,
+    amazon_ads_sb_spend: azAds.sb_spend,
+    amazon_ads_sb_sales: azAds.sb_sales,
+    amazon_ads_sd_spend: azAds.sd_spend,
+    amazon_ads_sd_sales: azAds.sd_sales,
     // raw channel metrics
     meta_purchases:    m.purchases,
     meta_revenue:      m.revenue,
