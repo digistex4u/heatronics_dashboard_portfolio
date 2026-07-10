@@ -1,6 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { fetchMonthSnapshot } from "../../lib/windsor";
 
+// Give Windsor pulls headroom; amazon_ads in particular is slow.
+export const config = { maxDuration: 60 };
+
 // GET /api/windsor?month=2026-06
 // Returns a single monthly snapshot. Called by the frontend for the current month.
 // Cached at the edge for 1 hour (Vercel ISR-style via cache-control).

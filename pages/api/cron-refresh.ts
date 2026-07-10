@@ -1,6 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { fetchMonthSnapshot } from "../../lib/windsor";
 
+// Give Windsor pulls headroom; amazon_ads in particular is slow.
+export const config = { maxDuration: 60 };
+
 // Called by Vercel cron: "5 0 1 * *" (00:05 on the 1st of each month)
 // Fetches the just-completed month so it's cached before any user opens the dash.
 // Also pre-fetches the new current month to warm the cache.

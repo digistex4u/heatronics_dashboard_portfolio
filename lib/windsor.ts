@@ -23,7 +23,8 @@ async function windsorFetch(
   dateFrom: string,
   dateTo: string,
   extraFilters?: [string, string, string | number][],
-  extraParams?: Record<string, string>
+  extraParams?: Record<string, string>,
+  timeoutMs = 45000
 ): Promise<WindsorRow[]> {
   const key = process.env.WINDSOR_API_KEY;
   if (!key) throw new Error("WINDSOR_API_KEY not set");
@@ -50,10 +51,20 @@ async function windsorFetch(
   }
 
   const url = `https://connectors.windsor.ai/${connector}?${params.toString()}`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Windsor/1.0" },
-    cache: "no-store",
-  });
+  // Hard timeout: a slow connector (e.g. amazon_ads) must never hang the whole
+  // serverless request past Vercel's function limit and 504 the other channels.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "User-Agent": "Windsor/1.0" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`Windsor ${connector} error: ${res.status}`);
 
   const json = await res.json();
@@ -145,7 +156,9 @@ export async function fetchAmazonAds(dateFrom: string, dateTo: string) {
   const fetchType = async (fields: string[]): Promise<WindsorRow[]> => {
     const half = async (from: string, to: string) => {
       try {
-        return await windsorFetch("amazon_ads", ACCOUNTS.amazon_ads, fields, from, to);
+        // 20s budget per half: amazon_ads is very slow via Windsor. If it does
+        // not respond in time we return 0 rows rather than blocking the snapshot.
+        return await windsorFetch("amazon_ads", ACCOUNTS.amazon_ads, fields, from, to, undefined, undefined, 20000);
       } catch {
         return [];
       }

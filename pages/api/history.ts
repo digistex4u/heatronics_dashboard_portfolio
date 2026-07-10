@@ -1,6 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { fetchMonthSnapshot } from "../../lib/windsor";
 
+// Give Windsor pulls headroom; amazon_ads in particular is slow.
+export const config = { maxDuration: 60 };
+
 // GET /api/history?from=2026-06&to=2026-07
 // Fetches multiple months in parallel. Used to backfill any months
 // that fall after the baseline (May 2026) but before the current month.
