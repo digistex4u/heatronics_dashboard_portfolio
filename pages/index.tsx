@@ -598,15 +598,15 @@ export default function Dashboard() {
               <div style={{display: "flex", flexDirection: "column", gap: 14}}>
                 <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12}}>
                   {(() => {
-                    const tMeta = merged.reduce((s: number, r: any) => s + (r.meta_spend || 0), 0);
-                    const tGoogle = merged.reduce((s: number, r: any) => s + (r.google_spend || 0), 0);
-                    const tAzAds = merged.reduce((s: number, r: any) => s + (r.amazon_ads_spend || 0), 0);
+                    const tMeta = allRows.reduce((s: number, r: any) => s + (r.meta_spend || 0), 0);
+                    const tGoogle = allRows.reduce((s: number, r: any) => s + (r.google_spend || 0), 0);
+                    const tAzAds = allRows.reduce((s: number, r: any) => s + (r.amazon_ads_spend || 0), 0);
                     const tBlendS = tMeta + tGoogle + tAzAds;
-                    const tShopify = merged.reduce((s: number, r: any) => s + (r.shopify_rev || 0), 0);
-                    const tAzSP = merged.reduce((s: number, r: any) => s + (r.amazon_sales || 0), 0);
+                    const tShopify = allRows.reduce((s: number, r: any) => s + (r.shopify_rev || 0), 0);
+                    const tAzSP = allRows.reduce((s: number, r: any) => s + (r.amazon_sales || 0), 0);
                     const tBlendR = tShopify + tAzSP;
                     const bRoas = tBlendS > 0 ? tBlendR / tBlendS : 0;
-                    const azAdsAttr = merged.reduce((s: number, r: any) => s + (r.amazon_ads_sales || 0), 0);
+                    const azAdsAttr = allRows.reduce((s: number, r: any) => s + (r.amazon_ads_sales || 0), 0);
                     const azR = tAzAds > 0 ? azAdsAttr / tAzAds : 0;
                     return <><KpiCard label="Blended Spend" value={fmt(tBlendS)} sub="Meta + Google + Amazon Ads" />
                       <KpiCard label="Blended Revenue" value={fmt(tBlendR)} sub="Shopify + Amazon SP" />
@@ -614,8 +614,8 @@ export default function Dashboard() {
                       <KpiCard label="Amazon Ads ROAS" value={azR.toFixed(2) + "\u00d7"} sub={fmt(tAzAds) + " spend \u2192 " + fmt(azAdsAttr) + " attributed"} accent="#e34948" /></>;
                   })()}
                 </div>
-                <ChartCard title="Monthly spend by channel" accent={COLORS.meta} data={merged.map((r: any) => ({Month: r.month, Meta: r.meta_spend, Google: r.google_spend, "Amazon Ads": r.amazon_ads_spend || 0}))} filename="blended_spend">
-                  <div style={{height: 300}}><ResponsiveContainer><BarChart data={merged} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
+                <ChartCard title="Monthly spend by channel" accent={COLORS.meta} data={allRows.map((r: any) => ({Month: r.month, Meta: r.meta_spend, Google: r.google_spend, "Amazon Ads": r.amazon_ads_spend || 0}))} filename="blended_spend">
+                  <div style={{height: 300}}><ResponsiveContainer><BarChart data={allRows} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
                     <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
                     <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize: 11}} />
                     <Bar dataKey="meta_spend" name="Meta" stackId="s" fill={COLORS.meta} />
@@ -623,16 +623,16 @@ export default function Dashboard() {
                     <Bar dataKey="amazon_ads_spend" name="Amazon Ads" stackId="s" fill={COLORS.amazon} radius={[3,3,0,0]} />
                   </BarChart></ResponsiveContainer></div>
                 </ChartCard>
-                <ChartCard title="Monthly revenue by source" accent={COLORS.shopify} data={merged.map((r: any) => ({Month: r.month, Shopify: r.shopify_rev, "Amazon SP": r.amazon_sales || 0}))} filename="blended_rev">
-                  <div style={{height: 280}}><ResponsiveContainer><BarChart data={merged} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
+                <ChartCard title="Monthly revenue by source" accent={COLORS.shopify} data={allRows.map((r: any) => ({Month: r.month, Shopify: r.shopify_rev, "Amazon SP": r.amazon_sales || 0}))} filename="blended_rev">
+                  <div style={{height: 280}}><ResponsiveContainer><BarChart data={allRows} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
                     <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
                     <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize: 11}} />
                     <Bar dataKey="shopify_rev" name="Shopify" stackId="r" fill={COLORS.shopify} />
                     <Bar dataKey="amazon_sales" name="Amazon SP" stackId="r" fill={COLORS.amazon} radius={[3,3,0,0]} />
                   </BarChart></ResponsiveContainer></div>
                 </ChartCard>
-                <ChartCard title="Channel ROAS trends" accent={COLORS.ltv} data={merged.map((r: any) => ({Month: r.month}))} filename="channel_roas">
-                  <div style={{height: 280}}><ResponsiveContainer><LineChart data={merged.map((r: any) => {
+                <ChartCard title="Channel ROAS trends" accent={COLORS.ltv} data={allRows.map((r: any) => ({Month: r.month}))} filename="channel_roas">
+                  <div style={{height: 280}}><ResponsiveContainer><LineChart data={allRows.map((r: any) => {
                     const tS = (r.meta_spend||0)+(r.google_spend||0)+(r.amazon_ads_spend||0);
                     const tR = (r.shopify_rev||0)+(r.amazon_sales||0);
                     return { month: r.month, meta: r.meta_spend > 0 ? +(r.shopify_rev/r.meta_spend).toFixed(2) : null, az_ads: (r.amazon_ads_spend||0) > 0 ? +((r.amazon_ads_sales||0)/r.amazon_ads_spend).toFixed(2) : null, blended: tS > 0 ? +(tR/tS).toFixed(2) : null };
@@ -646,7 +646,7 @@ export default function Dashboard() {
                 </ChartCard>
                 <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14}}>
                   <ChartCard title="Amazon Ads spend by type" accent={COLORS.amazon} data={[]} filename="az_ads_type_spend">
-                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={merged.filter((r: any) => r.amazon_ads_spend)} margin={{top:4,right:8,bottom:4,left:4}}>
+                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={allRows.filter((r: any) => r.amazon_ads_spend)} margin={{top:4,right:8,bottom:4,left:4}}>
                       <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
                       <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize:11}} />
                       <Bar dataKey="amazon_ads_sp_spend" name="Sponsored Products" stackId="a" fill="#ff6b35" />
@@ -655,7 +655,7 @@ export default function Dashboard() {
                     </BarChart></ResponsiveContainer></div>
                   </ChartCard>
                   <ChartCard title="Amazon Ads attributed sales by type" accent={COLORS.amazon} data={[]} filename="az_ads_type_sales">
-                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={merged.filter((r: any) => r.amazon_ads_sales)} margin={{top:4,right:8,bottom:4,left:4}}>
+                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={allRows.filter((r: any) => r.amazon_ads_sales)} margin={{top:4,right:8,bottom:4,left:4}}>
                       <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
                       <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize:11}} />
                       <Bar dataKey="amazon_ads_sp_sales" name="SP Sales" stackId="a" fill="#ff6b35" />
@@ -668,7 +668,7 @@ export default function Dashboard() {
                   <div style={{fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 8, textAlign: "right"}}>Blended monthly detail</div>
                   <table style={{width: "100%", borderCollapse: "collapse", fontSize: 11}}>
                     <thead><tr>{["Month","Meta \u20b9","Google \u20b9","Az Ads \u20b9","Total Spend","Shopify \u20b9","Amazon SP \u20b9","Total Rev","Blended ROAS","Az Ads ROAS"].map(h => <th key={h} style={{padding:"4px 6px",textAlign:"right",borderBottom:"0.5px solid #21262d",color:"#8b949e",fontWeight:400,fontSize:10,textTransform:"uppercase",letterSpacing:"0.4px"}}>{h}</th>)}</tr></thead>
-                    <tbody>{merged.slice(-12).map((r: any) => {
+                    <tbody>{allRows.slice(-12).map((r: any) => {
                       const tS=(r.meta_spend||0)+(r.google_spend||0)+(r.amazon_ads_spend||0);
                       const tR=(r.shopify_rev||0)+(r.amazon_sales||0);
                       const bR=tS>0?tR/tS:0;
