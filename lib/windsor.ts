@@ -164,15 +164,25 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
     if (!id) continue;
     byOrder.set(id, { total: Number(r.order_total_price) || 0, net: Number(r.order_net_sales) || 0 });
   }
-  let totalSales = 0;   // Shopify "Total sales" (incl tax/shipping, net of returns)
-  let netSales = 0;     // "Net sales" (gross - discounts - returns; excl tax/shipping)
+  let totalSales = 0;    // Shopify "Total sales" (incl tax/shipping, net of returns)
   let orderCount = 0;
-  byOrder.forEach((v) => { totalSales += v.total; netSales += v.net; if (v.total > 0) orderCount++; });
+  // Net/total ratio is measured ONLY over clean paid orders (total>0 && net>0).
+  // Voided/refunded orders set total_price to 0 while net_sales can stay positive,
+  // which would otherwise push the ratio above 1 and corrupt LTV.
+  let ratioTotal = 0;
+  let ratioNet = 0;
+  byOrder.forEach((v) => {
+    totalSales += v.total;
+    if (v.total > 0) {
+      orderCount++;
+      if (v.net > 0) { ratioTotal += v.total; ratioNet += v.net; }
+    }
+  });
 
   // RULE: revenue + AOV are on Total sales; LTV (value-per-buyer) is on NET sales.
-  // No customer-level net field exists, so scale cohort lifetime spend by this
-  // period's net/total ratio (tax+shipping share is stable across the store).
-  const netRatio = totalSales !== 0 ? netSales / totalSales : 1;
+  // No customer-level net field exists, so scale cohort lifetime spend by the
+  // store's net/total ratio (tax+shipping share; stable ~0.95 across paid orders).
+  const netRatio = ratioTotal > 0 ? ratioNet / ratioTotal : 1;
 
   return {
     buyers:      nb,
