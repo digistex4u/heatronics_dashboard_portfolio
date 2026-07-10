@@ -1,11 +1,12 @@
 // Windsor.ai server-side data fetcher
 // All calls go through Vercel API routes — WINDSOR_API_KEY never reaches the browser.
 
-const ACCOUNTS = {
-  meta:     "2294012640954204",   // Heatronics Meta Ads
-  google:   "492-700-2413",       // Heatronics Google Ads
-  shopify:  "heatronicss.myshopify.com",
-  amazon:   "AD0TBAKEOUYFH-IN",
+const ACCOUNTS: Record<string, string> = {
+  meta: "2294012640954204",
+  google: "492-700-2413",
+  shopify: "heatronicss.myshopify.com",
+  amazon: "AD0TBAKEOUYFH-IN",
+  amazon_ads: "3416950968051210",
 };
 
 interface WindsorRow {
