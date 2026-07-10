@@ -187,7 +187,7 @@ export default function Dashboard() {
   };
 
   // Which tabs this user may see
-  const visibleTabs = TABS;
+  const visibleTabs = ALL_TABS;
 
   // SWR for current month
   const cm = curMonth();
