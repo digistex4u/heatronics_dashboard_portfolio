@@ -32,7 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const results = await Promise.allSettled(months.map(fetchMonthSnapshot));
+    const results = await Promise.allSettled(months.map(m => fetchMonthSnapshot(m)));
     const data = results
       .map((r, i) =>
         r.status === "fulfilled"

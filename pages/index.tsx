@@ -22,7 +22,9 @@ const curMonth = () => {
 
 // Months between BASELINE end (2026-05) and current that need backfill
 function missingMonths(): string[] {
-  const baselineEnd = "2026-05";
+  // Derive from the actual last baked-in month so that months auto-committed
+  // into BASELINE by the monthly cron drop out of the live backfill.
+  const baselineEnd = BASELINE[BASELINE.length - 1]?.month ?? "2026-05";
   const cur = curMonth();
   const months: string[] = [];
   let [y, m] = baselineEnd.split("-").map(Number);

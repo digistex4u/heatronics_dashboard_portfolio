@@ -146,7 +146,7 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
 // ── Amazon Ads (Sponsored Products + Brands + Brands Video + Display) ──────────
 // Like Amazon SP, Amazon Ads times out on full months — split each ad-type pull
 // into two ~15-day halves and merge. Each ad type lives in its own Windsor table.
-export async function fetchAmazonAds(dateFrom: string, dateTo: string) {
+export async function fetchAmazonAds(dateFrom: string, dateTo: string, timeoutMs = 20000) {
   const midDate = new Date(dateFrom);
   midDate.setDate(midDate.getDate() + 14);
   const mid = midDate.toISOString().split("T")[0];
@@ -158,7 +158,7 @@ export async function fetchAmazonAds(dateFrom: string, dateTo: string) {
       try {
         // 20s budget per half: amazon_ads is very slow via Windsor. If it does
         // not respond in time we return 0 rows rather than blocking the snapshot.
-        return await windsorFetch("amazon_ads", ACCOUNTS.amazon_ads, fields, from, to, undefined, undefined, 20000);
+        return await windsorFetch("amazon_ads", ACCOUNTS.amazon_ads, fields, from, to, undefined, undefined, timeoutMs);
       } catch {
         return [];
       }
@@ -266,7 +266,7 @@ export async function fetchAmazon(dateFrom: string, dateTo: string) {
 }
 
 // ── Combined monthly snapshot ─────────────────────────────────────────────────
-export async function fetchMonthSnapshot(yearMonth: string) {
+export async function fetchMonthSnapshot(yearMonth: string, opts: { amazonAdsTimeoutMs?: number } = {}) {
   // yearMonth = "2026-06"
   const [year, month] = yearMonth.split("-").map(Number);
   const dateFrom = `${yearMonth}-01`;
@@ -278,7 +278,7 @@ export async function fetchMonthSnapshot(yearMonth: string) {
     fetchGoogle(dateFrom, dateTo),
     fetchShopify(dateFrom, dateTo),
     fetchAmazon(dateFrom, dateTo),
-    fetchAmazonAds(dateFrom, dateTo),
+    fetchAmazonAds(dateFrom, dateTo, opts.amazonAdsTimeoutMs ?? 20000),
   ]);
 
   const m  = meta.status     === "fulfilled" ? meta.value     : { spend: 0, purchases: 0, revenue: 0 };
