@@ -176,14 +176,6 @@ export default function Dashboard() {
   const [authChecked, setAuthChecked] = useState(false);
 
   // Restore session on mount
-  useEffect(() => {
-    try {
-      if (saved) {
-        const a = JSON.parse(saved);
-      }
-    } catch {}
-    setAuthChecked(true);
-  }, []);
 
   const handleLogin = (key: string, tabs: string[], r: string, _label: string) => {
     // Land on first allowed tab
