@@ -258,6 +258,7 @@ export async function fetchMonthSnapshot(yearMonth: string) {
   const g  = google.status   === "fulfilled" ? google.value   : { spend: 0, conversions: 0 };
   const sh = shopify.status  === "fulfilled" ? shopify.value  : { buyers: 0, orders: 0, revenue: 0, aov: 0, hist_ltv: 0, repeat_rate: 0 };
   const az = amazon.status   === "fulfilled" ? amazon.value   : { sales: 0, units: 0 };
+  const azAds = amazonAds.status === "fulfilled" ? amazonAds.value : { spend: 0, sales: 0, clicks: 0, impressions: 0, sp_spend: 0, sp_sales: 0, sb_spend: 0, sb_sales: 0, sd_spend: 0, sd_sales: 0 };
 
   return {
     month:       yearMonth,
