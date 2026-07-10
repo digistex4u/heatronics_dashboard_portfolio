@@ -160,246 +160,8 @@ function StaticTabFrame({ html, note }: { html: string; note: string }) {
 }
 
 // ── Login screen ──────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }: { onLogin: (key: string, tabs: string[], role: string, label: string) => void }) {
-  const [key, setKey] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    if (!key.trim()) return;
-    setBusy(true); setErr("");
-    try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: key.trim() }),
-      });
-      const j = await res.json();
-      if (j.ok) {
-        onLogin(key.trim(), j.tabs, j.role, j.label);
-      } else {
-        setErr(j.error || "Invalid key");
-      }
-    } catch {
-      setErr("Network error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ background: "#0d1117", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
-      <div style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 14, padding: "36px 34px", width: 380, maxWidth: "90vw" }}>
-        <div style={{ fontSize: 20, fontWeight: 600, color: "#fff", marginBottom: 4 }}>Heatronics Dashboard</div>
-        <div style={{ fontSize: 13, color: "#8b949e", marginBottom: 24 }}>Enter your access key to continue</div>
-        <input
-          type="password"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Access key"
-          autoFocus
-          style={{ width: "100%", padding: "10px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #30363d", background: "#0d1117", color: "#c9d1d9", marginBottom: 12, outline: "none" }}
-        />
-        {err && <div style={{ fontSize: 12, color: "#e34948", marginBottom: 12 }}>{err}</div>}
-        <button
-          onClick={submit}
-          disabled={busy}
-          style={{ width: "100%", padding: "10px", fontSize: 14, fontWeight: 500, borderRadius: 8, border: "none", background: "#ff6b35", color: "#fff", cursor: busy ? "wait" : "pointer" }}
-        >
-          {busy ? "Checking…" : "Enter"}
-        </button>
-        <div style={{ fontSize: 11, color: "#484f58", marginTop: 18, lineHeight: 1.5 }}>
-          Access is managed by your administrator. Each key unlocks a specific set of tabs.
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Admin panel ───────────────────────────────────────────────────────────────
-function AdminPanel({ adminKey, onClose }: { adminKey: string; onClose: () => void }) {
-  const [config, setConfig] = useState<Record<string, { role: string; tabs: string[]; label?: string }>>({});
-  const [source, setSource] = useState<string>("");
-  const [kvOn, setKvOn] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [saveErr, setSaveErr] = useState("");
-  const [stats, setStats] = useState<Record<string, { count: number; last: string | null }>>({});
-  const [trackingEnabled, setTrackingEnabled] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: adminKey, action: "getConfig" }),
-      });
-      const j = await res.json();
-      if (j.ok) {
-        setConfig(j.config); setSource(j.source); setKvOn(!!j.kvConfigured);
-        setStats(j.stats || {}); setTrackingEnabled(!!j.trackingEnabled);
-      }
-      setLoaded(true);
-    })();
-  }, [adminKey]);
-
-  const saveLive = async () => {
-    setSaveState("saving"); setSaveErr("");
-    try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: adminKey, action: "saveConfig", config }),
-      });
-      const j = await res.json();
-      if (j.ok) { setSaveState("saved"); setTimeout(() => setSaveState("idle"), 2500); }
-      else { setSaveState("error"); setSaveErr(j.error || "Save failed"); }
-    } catch {
-      setSaveState("error"); setSaveErr("Network error");
-    }
-  };
-
-  const fmtLast = (iso: string | null) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
-
-  const tabIds = ALL_TABS.map((t) => t.id);
-
-  const toggleTab = (k: string, tabId: string) => {
-    setConfig((prev) => {
-      const entry = { ...prev[k] };
-      let tabs = [...entry.tabs];
-      if (tabs.includes("*")) tabs = [...tabIds]; // expand wildcard to edit individually
-      if (tabs.includes(tabId)) tabs = tabs.filter((t) => t !== tabId);
-      else tabs.push(tabId);
-      entry.tabs = tabs;
-      return { ...prev, [k]: entry };
-    });
-  };
-
-  const setRole = (k: string, role: string) =>
-    setConfig((prev) => ({ ...prev, [k]: { ...prev[k], role } }));
-  const setLabel = (k: string, label: string) =>
-    setConfig((prev) => ({ ...prev, [k]: { ...prev[k], label } }));
-
-  const addKey = () => {
-    const newKey = `key-${Math.random().toString(36).slice(2, 10)}`;
-    setConfig((prev) => ({ ...prev, [newKey]: { role: "user", tabs: ["channel", "ltv"], label: "New client" } }));
-  };
-  const removeKey = (k: string) =>
-    setConfig((prev) => { const c = { ...prev }; delete c[k]; return c; });
-
-  const exportJson = JSON.stringify(config);
-  const copyConfig = async () => {
-    try { await navigator.clipboard.writeText(exportJson); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
-  };
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "40px 20px" }}>
-      <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 14, padding: 24, width: 860, maxWidth: "96vw" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: "#fff" }}>Admin — Access Control</div>
-          <button onClick={onClose} style={{ fontSize: 13, padding: "5px 12px", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer" }}>Close</button>
-        </div>
-        <div style={{ fontSize: 13, color: "#8b949e", marginBottom: 16 }}>
-          Create keys and choose which tabs each one unlocks. {kvOn
-            ? <>Changes go live instantly when you click <b style={{ color: "#c9d1d9" }}>Save changes</b>.</>
-            : <>Live saving is off — copy the config into the <b style={{ color: "#c9d1d9" }}>ACCESS_KEYS</b> env var in Vercel, then redeploy.</>}
-        </div>
-
-        {source === "default" && (
-          <div style={{ background: "#1c1408", border: "0.5px solid #d29922", borderLeft: "3px solid #d29922", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#d29922", marginBottom: 16 }}>
-            You're on the default <b>admin</b> key. Add real keys below and save, or set ACCESS_KEYS in Vercel, to secure the dashboard.
-          </div>
-        )}
-
-        {loaded && !trackingEnabled && (
-          <div style={{ background: "#0f1620", border: "0.5px solid #58a6ff", borderLeft: "3px solid #58a6ff", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#58a6ff", marginBottom: 16 }}>
-            Login tracking is off. To count logins per key, add a free Upstash Redis store from Vercel (Storage → Marketplace → Upstash for Redis) — it auto-adds the env vars, then redeploy. Until then the Logins column shows 0.
-          </div>
-        )}
-
-        {!loaded ? <div style={{ color: "#8b949e", fontSize: 13 }}>Loading…</div> : (
-          <>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 400, fontSize: 10.5, textTransform: "uppercase", borderBottom: "0.5px solid #21262d" }}>Key</th>
-                    <th style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 400, fontSize: 10.5, textTransform: "uppercase", borderBottom: "0.5px solid #21262d" }}>Label</th>
-                    <th style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 400, fontSize: 10.5, textTransform: "uppercase", borderBottom: "0.5px solid #21262d" }}>Role</th>
-                    <th style={{ padding: "6px 8px", textAlign: "right", color: "#8b949e", fontWeight: 400, fontSize: 10.5, textTransform: "uppercase", borderBottom: "0.5px solid #21262d" }}>Logins</th>
-                    <th style={{ padding: "6px 8px", textAlign: "left", color: "#8b949e", fontWeight: 400, fontSize: 10.5, textTransform: "uppercase", borderBottom: "0.5px solid #21262d", whiteSpace: "nowrap" }}>Last login</th>
-                    {ALL_TABS.map((t) => (
-                      <th key={t.id} style={{ padding: "6px 4px", textAlign: "center", color: "#8b949e", fontWeight: 400, fontSize: 9.5, borderBottom: "0.5px solid #21262d", writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap", height: 70 }}>{t.label}</th>
-                    ))}
-                    <th style={{ borderBottom: "0.5px solid #21262d" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(config).map(([k, entry]) => {
-                    const all = entry.tabs.includes("*");
-                    return (
-                      <tr key={k} style={{ borderBottom: "0.5px solid #21262d" }}>
-                        <td style={{ padding: "6px 8px", color: "#c9d1d9", fontFamily: "monospace", fontSize: 11, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</td>
-                        <td style={{ padding: "6px 8px" }}>
-                          <input value={entry.label ?? ""} onChange={(e) => setLabel(k, e.target.value)} style={{ width: 90, padding: "3px 6px", fontSize: 11, borderRadius: 4, border: "1px solid #30363d", background: "#0d1117", color: "#c9d1d9" }} />
-                        </td>
-                        <td style={{ padding: "6px 8px" }}>
-                          <select value={entry.role} onChange={(e) => setRole(k, e.target.value)} style={{ fontSize: 11, padding: "3px 4px", borderRadius: 4, border: "1px solid #30363d", background: "#0d1117", color: "#c9d1d9" }}>
-                            <option value="user">user</option>
-                            <option value="admin">admin</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", color: "#c9d1d9", fontWeight: 500 }}>{stats[k]?.count ?? 0}</td>
-                        <td style={{ padding: "6px 8px", color: "#8b949e", fontSize: 11, whiteSpace: "nowrap" }}>{fmtLast(stats[k]?.last ?? null)}</td>
-                        {ALL_TABS.map((t) => (
-                          <td key={t.id} style={{ padding: "6px 4px", textAlign: "center" }}>
-                            <input type="checkbox" checked={all || entry.tabs.includes(t.id)} onChange={() => toggleTab(k, t.id)} style={{ cursor: "pointer" }} />
-                          </td>
-                        ))}
-                        <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                          <button onClick={() => removeKey(k)} style={{ fontSize: 11, color: "#e34948", background: "transparent", border: "none", cursor: "pointer" }}>✕</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={addKey} style={{ fontSize: 12, padding: "6px 14px", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9", cursor: "pointer" }}>+ Add key</button>
-              {kvOn && (
-                <button
-                  onClick={saveLive}
-                  disabled={saveState === "saving"}
-                  style={{ fontSize: 12, padding: "6px 16px", borderRadius: 6, border: "1px solid #3fb950", background: saveState === "saved" ? "#238636" : "#3fb950", color: "#fff", fontWeight: 600, cursor: saveState === "saving" ? "wait" : "pointer" }}
-                >
-                  {saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved — live now" : "Save changes"}
-                </button>
-              )}
-              <button onClick={copyConfig} style={{ fontSize: 12, padding: "6px 14px", borderRadius: 6, border: kvOn ? "1px solid #30363d" : "1px solid #ff6b35", background: kvOn ? "transparent" : "#ff6b35", color: kvOn ? "#8b949e" : "#fff", fontWeight: kvOn ? 400 : 500, cursor: "pointer" }}>
-                {copied ? "✓ Copied!" : kvOn ? "Copy config (backup)" : "Copy ACCESS_KEYS config"}
-              </button>
-              {!kvOn && <span style={{ fontSize: 11, color: "#8b949e" }}>→ paste into Vercel env var, then redeploy</span>}
-              {saveState === "error" && <span style={{ fontSize: 11, color: "#e34948" }}>{saveErr}</span>}
-            </div>
-
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 6 }}>Config preview (this is what to paste):</div>
-              <textarea readOnly value={exportJson} style={{ width: "100%", height: 90, fontSize: 11, fontFamily: "monospace", padding: 10, borderRadius: 8, border: "1px solid #30363d", background: "#0d1117", color: "#8b949e", resize: "vertical" }} />
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ── main page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
@@ -409,39 +171,31 @@ export default function Dashboard() {
   const [lastFetched, setLastFetched] = useState<string>("");
 
   // ── Auth / access control ──
-  const [authKey, setAuthKey] = useState<string | null>(null);
   const [grantedTabs, setGrantedTabs] = useState<string[]>([]);
   const [role, setRole] = useState<string>("");
   const [authChecked, setAuthChecked] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
 
   // Restore session on mount
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem("heatronics_auth");
       if (saved) {
         const a = JSON.parse(saved);
-        setAuthKey(a.key); setGrantedTabs(a.tabs); setRole(a.role);
       }
     } catch {}
     setAuthChecked(true);
   }, []);
 
   const handleLogin = (key: string, tabs: string[], r: string, _label: string) => {
-    setAuthKey(key); setGrantedTabs(tabs); setRole(r);
-    try { sessionStorage.setItem("heatronics_auth", JSON.stringify({ key, tabs, role: r })); } catch {}
     // Land on first allowed tab
     const firstAllowed = ALL_TABS.find((t) => tabs.includes("*") || tabs.includes(t.id));
     if (firstAllowed) setTab(firstAllowed.idx);
   };
 
   const handleLogout = () => {
-    setAuthKey(null); setGrantedTabs([]); setRole("");
-    try { sessionStorage.removeItem("heatronics_auth"); } catch {}
   };
 
   // Which tabs this user may see
-  const visibleTabs = ALL_TABS.filter((t) => grantedTabs.includes("*") || grantedTabs.includes(t.id));
+  const visibleTabs = TABS;
 
   // SWR for current month
   const cm = curMonth();
@@ -505,13 +259,9 @@ export default function Dashboard() {
   if (!authChecked) {
     return <div style={{ background: "#0d1117", minHeight: "100vh" }} />;
   }
-  if (!authKey) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
 
   return (
     <div style={{ background: "#0d1117", minHeight: "100vh", color: "#c9d1d9", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", paddingBottom: 48 }}>
-      {showAdmin && authKey && <AdminPanel adminKey={authKey} onClose={() => setShowAdmin(false)} />}
 
       {/* Header */}
       <div style={{ background: "#0a0d12", borderBottom: "1px solid #21262d", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, position: "sticky", top: 0, zIndex: 100 }}>
@@ -555,7 +305,6 @@ export default function Dashboard() {
           </button>
           {role === "admin" && (
             <button
-              onClick={() => setShowAdmin(true)}
               title="Manage access keys and tab permissions"
               style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
             >
