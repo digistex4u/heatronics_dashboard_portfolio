@@ -2,11 +2,11 @@
 // All calls go through Vercel API routes — WINDSOR_API_KEY never reaches the browser.
 
 const ACCOUNTS: Record<string, string> = {
-  meta: "2294012640954204",
-  google: "492-700-2413",
-  shopify: "heatronicss.myshopify.com",
-  amazon: "AD0TBAKEOUYFH-IN",
-  amazon_ads: "3416950968051210",
+  meta:       "2294012640954204",   // Heatronics Meta Ads
+  google:     "492-700-2413",       // Heatronics Google Ads
+  shopify:    "heatronicss.myshopify.com",
+  amazon:     "AD0TBAKEOUYFH-IN",   // Amazon SP (Seller Central)
+  amazon_ads: "3416950968051210",   // HEATRONICS MEDICAL DEVICES (Amazon Ads)
 };
 
 interface WindsorRow {
@@ -132,70 +132,84 @@ export async function fetchShopify(dateFrom: string, dateTo: string) {
   };
 }
 
-
-// ── Amazon Ads (Sponsored Products + Brands + Display) ────────────────────────
+// ── Amazon Ads (Sponsored Products + Brands + Brands Video + Display) ──────────
+// Like Amazon SP, Amazon Ads times out on full months — split each ad-type pull
+// into two ~15-day halves and merge. Each ad type lives in its own Windsor table.
 export async function fetchAmazonAds(dateFrom: string, dateTo: string) {
-  // Sponsored Products — campaign level
-  const spRows = await windsorFetch(
-    "amazon_ads", ACCOUNTS.amazon_ads,
-    ["sponsored_products_campaign__spend", "sponsored_products_campaign__attributedsales14d",
-     "sponsored_products_campaign__clicks", "sponsored_products_campaign__impressions"],
-    dateFrom, dateTo
-  );
+  const midDate = new Date(dateFrom);
+  midDate.setDate(midDate.getDate() + 14);
+  const mid = midDate.toISOString().split("T")[0];
+  const secondFrom = new Date(new Date(mid).getTime() + 86400000).toISOString().split("T")[0];
 
-  // Sponsored Brands (non-video) — campaign level
-  const sbRows = await windsorFetch(
-    "amazon_ads", ACCOUNTS.amazon_ads,
-    ["sponsored_brands_campaign_non_video__spend", "sponsored_brands_campaign_non_video__attributedsales14d",
-     "sponsored_brands_campaign_non_video__clicks", "sponsored_brands_campaign_non_video__impressions"],
-    dateFrom, dateTo
-  );
+  // Pull one ad-type's fields across both halves; swallow errors to 0 rows.
+  const fetchType = async (fields: string[]): Promise<WindsorRow[]> => {
+    const half = async (from: string, to: string) => {
+      try {
+        return await windsorFetch("amazon_ads", ACCOUNTS.amazon_ads, fields, from, to);
+      } catch {
+        return [];
+      }
+    };
+    const [h1, h2] = await Promise.all([half(dateFrom, mid), half(secondFrom, dateTo)]);
+    return [...h1, ...h2];
+  };
 
-  // Sponsored Brands Video — campaign level
-  const sbvRows = await windsorFetch(
-    "amazon_ads", ACCOUNTS.amazon_ads,
-    ["sponsored_brands_campaign_video__spend", "sponsored_brands_campaign_video__sales",
-     "sponsored_brands_campaign_video__clicks", "sponsored_brands_campaign_video__impressions"],
-    dateFrom, dateTo
-  );
+  const [spRows, sbRows, sbvRows, sdRows] = await Promise.all([
+    fetchType([
+      "sponsored_products_campaign__spend",
+      "sponsored_products_campaign__attributedsales14d",
+      "sponsored_products_campaign__clicks",
+      "sponsored_products_campaign__impressions",
+    ]),
+    fetchType([
+      "sponsored_brands_campaign_non_video__spend",
+      "sponsored_brands_campaign_non_video__attributedsales14d",
+      "sponsored_brands_campaign_non_video__clicks",
+      "sponsored_brands_campaign_non_video__impressions",
+    ]),
+    fetchType([
+      "sponsored_brands_campaign_video__spend",
+      "sponsored_brands_campaign_video__sales",
+      "sponsored_brands_campaign_video__clicks",
+      "sponsored_brands_campaign_video__impressions",
+    ]),
+    fetchType([
+      "sponsored_display_campaign__cost",
+      "sponsored_display_campaign__sales",
+      "sponsored_display_campaign__clicks",
+      "sponsored_display_campaign__impressions",
+    ]),
+  ]);
 
-  // Sponsored Display — campaign level
-  const sdRows = await windsorFetch(
-    "amazon_ads", ACCOUNTS.amazon_ads,
-    ["sponsored_display_campaign__cost", "sponsored_display_campaign__sales",
-     "sponsored_display_campaign__clicks", "sponsored_display_campaign__impressions"],
-    dateFrom, dateTo
-  );
-
-  const spSpend = sum(spRows, "sponsored_products_campaign__spend");
-  const sbSpend = sum(sbRows, "sponsored_brands_campaign_non_video__spend");
+  const spSpend  = sum(spRows,  "sponsored_products_campaign__spend");
+  const sbSpend  = sum(sbRows,  "sponsored_brands_campaign_non_video__spend");
   const sbvSpend = sum(sbvRows, "sponsored_brands_campaign_video__spend");
-  const sdSpend = sum(sdRows, "sponsored_display_campaign__cost");
+  const sdSpend  = sum(sdRows,  "sponsored_display_campaign__cost");
 
-  const spSales = sum(spRows, "sponsored_products_campaign__attributedsales14d");
-  const sbSales = sum(sbRows, "sponsored_brands_campaign_non_video__attributedsales14d");
+  const spSales  = sum(spRows,  "sponsored_products_campaign__attributedsales14d");
+  const sbSales  = sum(sbRows,  "sponsored_brands_campaign_non_video__attributedsales14d");
   const sbvSales = sum(sbvRows, "sponsored_brands_campaign_video__sales");
-  const sdSales = sum(sdRows, "sponsored_display_campaign__sales");
+  const sdSales  = sum(sdRows,  "sponsored_display_campaign__sales");
 
-  const spClicks = sum(spRows, "sponsored_products_campaign__clicks");
-  const sbClicks = sum(sbRows, "sponsored_brands_campaign_non_video__clicks");
+  const spClicks  = sum(spRows,  "sponsored_products_campaign__clicks");
+  const sbClicks  = sum(sbRows,  "sponsored_brands_campaign_non_video__clicks");
   const sbvClicks = sum(sbvRows, "sponsored_brands_campaign_video__clicks");
-  const sdClicks = sum(sdRows, "sponsored_display_campaign__clicks");
+  const sdClicks  = sum(sdRows,  "sponsored_display_campaign__clicks");
 
-  const spImpr = sum(spRows, "sponsored_products_campaign__impressions");
-  const sbImpr = sum(sbRows, "sponsored_brands_campaign_non_video__impressions");
+  const spImpr  = sum(spRows,  "sponsored_products_campaign__impressions");
+  const sbImpr  = sum(sbRows,  "sponsored_brands_campaign_non_video__impressions");
   const sbvImpr = sum(sbvRows, "sponsored_brands_campaign_video__impressions");
-  const sdImpr = sum(sdRows, "sponsored_display_campaign__impressions");
+  const sdImpr  = sum(sdRows,  "sponsored_display_campaign__impressions");
 
   return {
-    spend: Math.round(spSpend + sbSpend + sbvSpend + sdSpend),
-    sales: Math.round(spSales + sbSales + sbvSales + sdSales),
-    clicks: Math.round(spClicks + sbClicks + sbvClicks + sdClicks),
+    spend:       Math.round(spSpend + sbSpend + sbvSpend + sdSpend),
+    sales:       Math.round(spSales + sbSales + sbvSales + sdSales),
+    clicks:      Math.round(spClicks + sbClicks + sbvClicks + sdClicks),
     impressions: Math.round(spImpr + sbImpr + sbvImpr + sdImpr),
-    // Breakdown by ad type
-    sp_spend: Math.round(spSpend), sp_sales: Math.round(spSales),
+    // Per-type breakdown (SB combines non-video + video)
+    sp_spend: Math.round(spSpend),           sp_sales: Math.round(spSales),
     sb_spend: Math.round(sbSpend + sbvSpend), sb_sales: Math.round(sbSales + sbvSales),
-    sd_spend: Math.round(sdSpend), sd_sales: Math.round(sdSales),
+    sd_spend: Math.round(sdSpend),           sd_sales: Math.round(sdSales),
   };
 }
 
@@ -274,16 +288,16 @@ export async function fetchMonthSnapshot(yearMonth: string) {
     amazon_sales: az.sales,
     amazon_units: az.units,
     // Amazon Ads
-    amazon_ads_spend: azAds.spend,
-    amazon_ads_sales: azAds.sales,
-    amazon_ads_clicks: azAds.clicks,
+    amazon_ads_spend:       azAds.spend,
+    amazon_ads_sales:       azAds.sales,
+    amazon_ads_clicks:      azAds.clicks,
     amazon_ads_impressions: azAds.impressions,
-    amazon_ads_sp_spend: azAds.sp_spend,
-    amazon_ads_sp_sales: azAds.sp_sales,
-    amazon_ads_sb_spend: azAds.sb_spend,
-    amazon_ads_sb_sales: azAds.sb_sales,
-    amazon_ads_sd_spend: azAds.sd_spend,
-    amazon_ads_sd_sales: azAds.sd_sales,
+    amazon_ads_sp_spend:    azAds.sp_spend,
+    amazon_ads_sp_sales:    azAds.sp_sales,
+    amazon_ads_sb_spend:    azAds.sb_spend,
+    amazon_ads_sb_sales:    azAds.sb_sales,
+    amazon_ads_sd_spend:    azAds.sd_spend,
+    amazon_ads_sd_sales:    azAds.sd_sales,
     // raw channel metrics
     meta_purchases:    m.purchases,
     meta_revenue:      m.revenue,

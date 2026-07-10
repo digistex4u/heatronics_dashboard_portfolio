@@ -21,6 +21,18 @@ export interface MonthRow {
   // Amazon
   amazon_sales: number;
   amazon_units: number | null;
+  // Amazon Ads (Sponsored Products / Brands / Display) — live months only.
+  // Baseline months (Aug 2025–May 2026) lack these, so all are optional.
+  amazon_ads_spend?: number;
+  amazon_ads_sales?: number;
+  amazon_ads_clicks?: number;
+  amazon_ads_impressions?: number;
+  amazon_ads_sp_spend?: number;
+  amazon_ads_sp_sales?: number;
+  amazon_ads_sb_spend?: number;
+  amazon_ads_sb_sales?: number;
+  amazon_ads_sd_spend?: number;
+  amazon_ads_sd_sales?: number;
   // fetch metadata
   fetched_at?: string;
 }

@@ -54,6 +54,7 @@ const ALL_TABS = [
   { id: "ltv",      label: "LTV",                 idx: 1 },
   { id: "amazon",   label: "Amazon vs Ads",       idx: 2 },
   { id: "products", label: "Products & Cities",   idx: 3 },
+  { id: "blended",  label: "Blended",             idx: 4 },
   ...STATIC_TABS.map((t, i) => ({ id: t.key, label: t.label, idx: 5 + i })),
 ];
 
@@ -593,105 +594,168 @@ export default function Dashboard() {
           </div>
         )}
 
-        
-            {tab === 4 && (
-              <div style={{display: "flex", flexDirection: "column", gap: 14}}>
-                <div style={{display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12}}>
-                  {(() => {
-                    const tMeta = allRows.reduce((s: number, r: any) => s + (r.meta_spend || 0), 0);
-                    const tGoogle = allRows.reduce((s: number, r: any) => s + (r.google_spend || 0), 0);
-                    const tAzAds = allRows.reduce((s: number, r: any) => s + (r.amazon_ads_spend || 0), 0);
-                    const tBlendS = tMeta + tGoogle + tAzAds;
-                    const tShopify = allRows.reduce((s: number, r: any) => s + (r.shopify_rev || 0), 0);
-                    const tAzSP = allRows.reduce((s: number, r: any) => s + (r.amazon_sales || 0), 0);
-                    const tBlendR = tShopify + tAzSP;
-                    const bRoas = tBlendS > 0 ? tBlendR / tBlendS : 0;
-                    const azAdsAttr = allRows.reduce((s: number, r: any) => s + (r.amazon_ads_sales || 0), 0);
-                    const azR = tAzAds > 0 ? azAdsAttr / tAzAds : 0;
-                    return <><KpiCard label="Blended Spend" value={fmt(tBlendS)} sub="Meta + Google + Amazon Ads" />
-                      <KpiCard label="Blended Revenue" value={fmt(tBlendR)} sub="Shopify + Amazon SP" />
-                      <KpiCard label="Blended ROAS" value={bRoas.toFixed(2) + "\u00d7"} sub="All rev \u00f7 all spend" accent={bRoas >= 3 ? "#3fb950" : bRoas < 2 ? "#f85149" : undefined} />
-                      <KpiCard label="Amazon Ads ROAS" value={azR.toFixed(2) + "\u00d7"} sub={fmt(tAzAds) + " spend \u2192 " + fmt(azAdsAttr) + " attributed"} accent="#e34948" /></>;
-                  })()}
+        {/* ── TAB 4: Blended ── */}
+        {tab === 4 && (() => {
+          const tMeta   = allRows.reduce((s, r) => s + (r.meta_spend ?? 0), 0);
+          const tGoogle = allRows.reduce((s, r) => s + (r.google_spend ?? 0), 0);
+          const tAzAds  = allRows.reduce((s, r) => s + (r.amazon_ads_spend ?? 0), 0);
+          const tBlendSpend = tMeta + tGoogle + tAzAds;
+          const tShopify = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
+          const tAzSP    = allRows.reduce((s, r) => s + (r.amazon_sales ?? 0), 0);
+          const tBlendRev = tShopify + tAzSP;
+          const blendRoas = tBlendSpend > 0 ? tBlendRev / tBlendSpend : 0;
+          const tAzAdsSales = allRows.reduce((s, r) => s + (r.amazon_ads_sales ?? 0), 0);
+          const azAdsRoas = tAzAds > 0 ? tAzAdsSales / tAzAds : 0;
+
+          const azTypeData = [
+            { type: "Sponsored Products", Spend: allRows.reduce((s, r) => s + (r.amazon_ads_sp_spend ?? 0), 0), Sales: allRows.reduce((s, r) => s + (r.amazon_ads_sp_sales ?? 0), 0) },
+            { type: "Sponsored Brands",   Spend: allRows.reduce((s, r) => s + (r.amazon_ads_sb_spend ?? 0), 0), Sales: allRows.reduce((s, r) => s + (r.amazon_ads_sb_sales ?? 0), 0) },
+            { type: "Sponsored Display",  Spend: allRows.reduce((s, r) => s + (r.amazon_ads_sd_spend ?? 0), 0), Sales: allRows.reduce((s, r) => s + (r.amazon_ads_sd_sales ?? 0), 0) },
+          ];
+
+          const roasRows = allRows.map(r => {
+            const spend = (r.meta_spend ?? 0) + (r.google_spend ?? 0) + (r.amazon_ads_spend ?? 0);
+            const rev   = (r.shopify_rev ?? 0) + (r.amazon_sales ?? 0);
+            return {
+              month: r.month,
+              meta_roas:    (r.meta_spend ?? 0) > 0 ? +((r.shopify_rev ?? 0) / (r.meta_spend as number)).toFixed(2) : null,
+              az_ads_roas:  (r.amazon_ads_spend ?? 0) > 0 ? +((r.amazon_ads_sales ?? 0) / (r.amazon_ads_spend as number)).toFixed(2) : null,
+              blended_roas: spend > 0 ? +(rev / spend).toFixed(2) : null,
+            };
+          });
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <KpiCard label="Blended spend" value={fmt(tBlendSpend)} sub="Meta + Google + Amazon Ads" />
+                <KpiCard label="Blended revenue" value={fmt(tBlendRev)} sub="Shopify + Amazon SP" />
+                <KpiCard label="Blended ROAS" value={blendRoas.toFixed(2) + "×"} sub="All revenue ÷ all spend" accent={blendRoas >= 3 ? "#3fb950" : blendRoas < 2 ? "#f85149" : undefined} />
+                <KpiCard label="Amazon Ads ROAS" value={tAzAds > 0 ? azAdsRoas.toFixed(2) + "×" : "—"} sub={fmt(tAzAds) + " spend → " + fmt(tAzAdsSales) + " sales"} accent={C.amazon} />
+              </div>
+
+              <ChartCard title="Monthly spend by channel (Meta / Google / Amazon Ads)" accent={C.meta} filename="blended_spend_by_channel" data={allRows.map(r => ({ Month: r.month, Meta: r.meta_spend, Google: r.google_spend, "Amazon Ads": r.amazon_ads_spend ?? 0 }))}>
+                <div style={{ height: 300 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="meta_spend" name="Meta" stackId="s" fill={C.meta} />
+                      <Bar dataKey="google_spend" name="Google" stackId="s" fill={C.google} />
+                      <Bar dataKey="amazon_ads_spend" name="Amazon Ads" stackId="s" fill={C.amazon} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <ChartCard title="Monthly spend by channel" accent={COLORS.meta} data={allRows.map((r: any) => ({Month: r.month, Meta: r.meta_spend, Google: r.google_spend, "Amazon Ads": r.amazon_ads_spend || 0}))} filename="blended_spend">
-                  <div style={{height: 300}}><ResponsiveContainer><BarChart data={allRows} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
-                    <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize: 11}} />
-                    <Bar dataKey="meta_spend" name="Meta" stackId="s" fill={COLORS.meta} />
-                    <Bar dataKey="google_spend" name="Google" stackId="s" fill={COLORS.google} />
-                    <Bar dataKey="amazon_ads_spend" name="Amazon Ads" stackId="s" fill={COLORS.amazon} radius={[3,3,0,0]} />
-                  </BarChart></ResponsiveContainer></div>
+              </ChartCard>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <ChartCard title="Monthly revenue by source (Shopify / Amazon SP)" accent={C.shopify} filename="blended_rev_by_source" data={allRows.map(r => ({ Month: r.month, Shopify: r.shopify_rev, "Amazon SP": r.amazon_sales ?? 0 }))}>
+                  <div style={{ height: 280 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                        <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                        <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Bar dataKey="shopify_rev" name="Shopify" stackId="r" fill={C.shopify} />
+                        <Bar dataKey="amazon_sales" name="Amazon SP" stackId="r" fill={C.amazon} radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </ChartCard>
-                <ChartCard title="Monthly revenue by source" accent={COLORS.shopify} data={allRows.map((r: any) => ({Month: r.month, Shopify: r.shopify_rev, "Amazon SP": r.amazon_sales || 0}))} filename="blended_rev">
-                  <div style={{height: 280}}><ResponsiveContainer><BarChart data={allRows} margin={{top: 4, right: 8, bottom: 4, left: 4}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
-                    <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize: 11}} />
-                    <Bar dataKey="shopify_rev" name="Shopify" stackId="r" fill={COLORS.shopify} />
-                    <Bar dataKey="amazon_sales" name="Amazon SP" stackId="r" fill={COLORS.amazon} radius={[3,3,0,0]} />
-                  </BarChart></ResponsiveContainer></div>
+
+                <ChartCard title="ROAS trends (Meta / Amazon Ads / Blended)" accent={C.ltv} filename="blended_roas_trends" data={roasRows.map(r => ({ Month: r.month, "Meta ROAS": r.meta_roas, "Amazon Ads ROAS": r.az_ads_roas, "Blended ROAS": r.blended_roas }))}>
+                  <div style={{ height: 280 }}>
+                    <ResponsiveContainer>
+                      <LineChart data={roasRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                        <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                        <YAxis tick={axStyle} tickLine={false} />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="meta_roas" name="Meta ROAS" stroke={C.meta} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="az_ads_roas" name="Amazon Ads ROAS" stroke={C.amazon} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="blended_roas" name="Blended ROAS" stroke="#a371f7" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </ChartCard>
-                <ChartCard title="Channel ROAS trends" accent={COLORS.ltv} data={allRows.map((r: any) => ({Month: r.month}))} filename="channel_roas">
-                  <div style={{height: 280}}><ResponsiveContainer><LineChart data={allRows.map((r: any) => {
-                    const tS = (r.meta_spend||0)+(r.google_spend||0)+(r.amazon_ads_spend||0);
-                    const tR = (r.shopify_rev||0)+(r.amazon_sales||0);
-                    return { month: r.month, meta: r.meta_spend > 0 ? +(r.shopify_rev/r.meta_spend).toFixed(2) : null, az_ads: (r.amazon_ads_spend||0) > 0 ? +((r.amazon_ads_sales||0)/r.amazon_ads_spend).toFixed(2) : null, blended: tS > 0 ? +(tR/tS).toFixed(2) : null };
-                  })} margin={{top: 4, right: 16, bottom: 4, left: 4}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
-                    <YAxis tick={TICK} tickLine={false} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize: 11}} />
-                    <Line type="monotone" dataKey="meta" name="Meta ROAS" stroke={COLORS.meta} strokeWidth={2} dot={{r:3}} />
-                    <Line type="monotone" dataKey="az_ads" name="Amazon Ads ROAS" stroke={COLORS.amazon} strokeWidth={2} dot={{r:3}} />
-                    <Line type="monotone" dataKey="blended" name="Blended ROAS" stroke="#a371f7" strokeWidth={2.5} dot={{r:3}} />
-                  </LineChart></ResponsiveContainer></div>
-                </ChartCard>
-                <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14}}>
-                  <ChartCard title="Amazon Ads spend by type" accent={COLORS.amazon} data={[]} filename="az_ads_type_spend">
-                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={allRows.filter((r: any) => r.amazon_ads_spend)} margin={{top:4,right:8,bottom:4,left:4}}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
-                      <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize:11}} />
-                      <Bar dataKey="amazon_ads_sp_spend" name="Sponsored Products" stackId="a" fill="#ff6b35" />
-                      <Bar dataKey="amazon_ads_sb_spend" name="Sponsored Brands" stackId="a" fill="#58a6ff" />
-                      <Bar dataKey="amazon_ads_sd_spend" name="Sponsored Display" stackId="a" fill="#f778ba" radius={[3,3,0,0]} />
-                    </BarChart></ResponsiveContainer></div>
-                  </ChartCard>
-                  <ChartCard title="Amazon Ads attributed sales by type" accent={COLORS.amazon} data={[]} filename="az_ads_type_sales">
-                    <div style={{height: 240}}><ResponsiveContainer><BarChart data={allRows.filter((r: any) => r.amazon_ads_sales)} margin={{top:4,right:8,bottom:4,left:4}}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={GRID} /><XAxis dataKey="month" tick={TICK} tickLine={false} />
-                      <YAxis tick={TICK} tickLine={false} tickFormatter={fmt} /><Tooltip content={<Tip />} /><Legend wrapperStyle={{fontSize:11}} />
-                      <Bar dataKey="amazon_ads_sp_sales" name="SP Sales" stackId="a" fill="#ff6b35" />
-                      <Bar dataKey="amazon_ads_sb_sales" name="SB Sales" stackId="a" fill="#58a6ff" />
-                      <Bar dataKey="amazon_ads_sd_sales" name="SD Sales" stackId="a" fill="#f778ba" radius={[3,3,0,0]} />
-                    </BarChart></ResponsiveContainer></div>
-                  </ChartCard>
+              </div>
+
+              <ChartCard title="Amazon Ads spend & sales by type (SP / SB / SD)" accent={C.amazon} filename="amazon_ads_by_type" data={azTypeData}>
+                <div style={{ height: 260 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={azTypeData} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="type" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="Spend" name="Spend" fill={C.aov} radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="Sales" name="Attributed sales" fill={C.shopify} radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <div style={{background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: 14, overflowX: "auto"}}>
-                  <div style={{fontSize: 12, fontWeight: 500, color: "#8b949e", marginBottom: 8, textAlign: "right"}}>Blended monthly detail</div>
-                  <table style={{width: "100%", borderCollapse: "collapse", fontSize: 11}}>
-                    <thead><tr>{["Month","Meta \u20b9","Google \u20b9","Az Ads \u20b9","Total Spend","Shopify \u20b9","Amazon SP \u20b9","Total Rev","Blended ROAS","Az Ads ROAS"].map(h => <th key={h} style={{padding:"4px 6px",textAlign:"right",borderBottom:"0.5px solid #21262d",color:"#8b949e",fontWeight:400,fontSize:10,textTransform:"uppercase",letterSpacing:"0.4px"}}>{h}</th>)}</tr></thead>
-                    <tbody>{allRows.slice(-12).map((r: any) => {
-                      const tS=(r.meta_spend||0)+(r.google_spend||0)+(r.amazon_ads_spend||0);
-                      const tR=(r.shopify_rev||0)+(r.amazon_sales||0);
-                      const bR=tS>0?tR/tS:0;
-                      const aR=(r.amazon_ads_spend||0)>0?(r.amazon_ads_sales||0)/r.amazon_ads_spend:0;
-                      return <tr key={r.month} style={{borderBottom:"0.5px solid #21262d"}}>
-                        <td style={{padding:"4px 6px",color:"#8b949e"}}>{r.month}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right"}}>{fmt(r.meta_spend)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right"}}>{fmt(r.google_spend)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right"}}>{fmt(r.amazon_ads_spend||0)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right",color:"#c9d1d9",fontWeight:500}}>{fmt(tS)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right"}}>{fmt(r.shopify_rev)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right"}}>{fmt(r.amazon_sales||0)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right",color:"#c9d1d9",fontWeight:500}}>{fmt(tR)}</td>
-                        <td style={{padding:"4px 6px",textAlign:"right",color:bR>=3?"#3fb950":bR<2?"#f85149":"#c9d1d9"}}>{bR.toFixed(2)}\u00d7</td>
-                        <td style={{padding:"4px 6px",textAlign:"right",color:aR>=3?"#3fb950":aR<1?"#f85149":"#c9d1d9"}}>{(r.amazon_ads_spend||0)>0?aR.toFixed(2)+"\u00d7":"\u2014"}</td>
-                      </tr>;
-                    })}</tbody>
+              </ChartCard>
+
+              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
+                  <button
+                    onClick={() => exportToExcel(allRows.slice(-12).map(r => {
+                      const spend = (r.meta_spend ?? 0) + (r.google_spend ?? 0) + (r.amazon_ads_spend ?? 0);
+                      const rev = (r.shopify_rev ?? 0) + (r.amazon_sales ?? 0);
+                      return { Month: r.month, "Meta": r.meta_spend, "Google": r.google_spend, "Amazon Ads": r.amazon_ads_spend ?? 0, "Total Spend": spend, "Shopify": r.shopify_rev, "Amazon SP": r.amazon_sales ?? 0, "Total Rev": rev, "Blended ROAS": spend > 0 ? +(rev / spend).toFixed(2) : 0, "Az Ads ROAS": (r.amazon_ads_spend ?? 0) > 0 ? +((r.amazon_ads_sales ?? 0) / (r.amazon_ads_spend as number)).toFixed(2) : null };
+                    }), "blended_monthly_detail", "Blended Detail")}
+                    title="Download this table as Excel"
+                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                  >
+                    &#10515; Excel
+                  </button>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Blended monthly detail (last 12 months)</div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        {["Month", "Meta ₹", "Google ₹", "Az Ads ₹", "Total Spend", "Shopify ₹", "Amazon SP ₹", "Total Rev", "Blended ROAS", "Az Ads ROAS"].map(h => (
+                          <th key={h} style={{ padding: "4px 6px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allRows.slice(-12).map(r => {
+                        const spend = (r.meta_spend ?? 0) + (r.google_spend ?? 0) + (r.amazon_ads_spend ?? 0);
+                        const rev = (r.shopify_rev ?? 0) + (r.amazon_sales ?? 0);
+                        const bR = spend > 0 ? rev / spend : 0;
+                        const hasAz = (r.amazon_ads_spend ?? 0) > 0;
+                        const aR = hasAz ? (r.amazon_ads_sales ?? 0) / (r.amazon_ads_spend as number) : 0;
+                        return (
+                          <tr key={r.month} style={{ borderBottom: "0.5px solid #21262d" }}>
+                            <td style={{ padding: "4px 6px", color: "#8b949e" }}>{r.month}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.meta_spend ?? 0)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.google_spend ?? 0)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{hasAz ? fmt(r.amazon_ads_spend ?? 0) : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: "#c9d1d9", fontWeight: 500 }}>{fmt(spend)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.shopify_rev ?? 0)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{fmt(r.amazon_sales ?? 0)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: "#c9d1d9", fontWeight: 500 }}>{fmt(rev)}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: bR >= 3 ? "#3fb950" : bR < 2 ? "#f85149" : "#c9d1d9" }}>{spend > 0 ? bR.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: !hasAz ? "#8b949e" : aR >= 3 ? "#3fb950" : aR < 1 ? "#f85149" : "#c9d1d9" }}>{hasAz ? aR.toFixed(2) + "×" : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
                   </table>
                 </div>
               </div>
-            )}
+            </div>
+          );
+        })()}
 
-            {/* ── STATIC TABS (baked in, no live fetch) ── */}
+        {/* ── STATIC TABS (baked in, no live fetch) ── */}
         {tab >= LIVE_TABS.length && (() => {
           const st = STATIC_TABS[tab - LIVE_TABS.length];
           return st ? <StaticTabFrame html={st.html} note={st.note} /> : null;
