@@ -173,7 +173,7 @@ export default function Dashboard() {
   // ── Auth / access control ──
   const [grantedTabs, setGrantedTabs] = useState<string[]>([]);
   const [role, setRole] = useState<string>("");
-  const [authChecked, setAuthChecked] = useState(false);
+  const [authChecked, setAuthChecked] = useState(true);
 
   // Restore session on mount
 
