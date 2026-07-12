@@ -33,6 +33,12 @@ export interface MonthRow {
   amazon_ads_sb_sales?: number;
   amazon_ads_sd_spend?: number;
   amazon_ads_sd_sales?: number;
+  // Per-channel platform metrics — live months only (baseline lacks them, so
+  // per-channel CAC/ROAS on the Efficiency tab shows only for recent months).
+  meta_purchases?: number;
+  meta_revenue?: number;
+  google_conversions?: number;
+  google_revenue?: number;
   // fetch metadata
   fetched_at?: string;
 }

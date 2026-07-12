@@ -14,6 +14,10 @@ const fmt = (n: number) =>
   n >= 1e5 ? `₹${(n / 1e5).toFixed(1)}L` : `₹${Math.round(n).toLocaleString("en-IN")}`;
 const num = (n: number) => Math.round(n).toLocaleString("en-IN");
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+const roas = (rev: number, spend: number) => (spend > 0 ? rev / spend : 0);
+
+// SKU-level sales row (live, from /api/skus).
+type SkuRow = { name: string; units: number; revenue: number };
 
 const curMonth = () => {
   const n = new Date();
@@ -50,14 +54,15 @@ const gridColor = "#2c2c2a";
 // Live tabs (fetch Windsor) + static tabs (baked in, zero fetch load)
 // Tab registry — each tab has a stable id used for access control.
 // idx is the canonical render index used by the tab === N checks below.
-const LIVE_TABS = ["Channel Trends", "LTV", "Amazon vs Ads", "Products & Cities", "Blended"];
+const LIVE_TABS = ["Channel Trends", "LTV", "Amazon vs Ads", "Products & Cities", "Blended", "Efficiency"];
 const ALL_TABS = [
-  { id: "channel",  label: "Channel Trends",     idx: 0 },
-  { id: "ltv",      label: "LTV",                 idx: 1 },
-  { id: "amazon",   label: "Amazon vs Ads",       idx: 2 },
-  { id: "products", label: "Products & Cities",   idx: 3 },
-  { id: "blended",  label: "Blended",             idx: 4 },
-  ...STATIC_TABS.map((t, i) => ({ id: t.key, label: t.label, idx: 5 + i })),
+  { id: "channel",    label: "Channel Trends",    idx: 0 },
+  { id: "ltv",        label: "LTV",               idx: 1 },
+  { id: "amazon",     label: "Amazon vs Ads",     idx: 2 },
+  { id: "products",   label: "Products & Cities", idx: 3 },
+  { id: "blended",    label: "Blended",           idx: 4 },
+  { id: "efficiency", label: "CAC & ROAS",        idx: 5 },
+  ...STATIC_TABS.map((t, i) => ({ id: t.key, label: t.label, idx: 6 + i })),
 ];
 
 // ── components ────────────────────────────────────────────────────────────────
@@ -144,6 +149,52 @@ function ChartCard({
   );
 }
 
+// Live SKU sales card: top products by rupee revenue with a bar + units, an
+// Excel export of the full list, and loading/empty/error states.
+function SkuCard({ title, rows, status, accent, filename }: {
+  title: string; rows: SkuRow[]; status: "idle" | "loading" | "done" | "error"; accent?: string; filename: string;
+}) {
+  const top = rows.slice(0, 12);
+  const max = top.length ? top[0].revenue : 0;
+  const totRev = rows.reduce((s, r) => s + r.revenue, 0);
+  const totUnits = rows.reduce((s, r) => s + r.units, 0);
+  return (
+    <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8 }}>
+        <button
+          onClick={() => exportToExcel(rows.map(r => ({ Product: r.name, "Revenue ₹": r.revenue, Units: r.units })), filename, title)}
+          disabled={!rows.length}
+          title="Download full SKU list as Excel"
+          style={{ fontSize: 11, padding: "3px 9px", cursor: rows.length ? "pointer" : "default", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", whiteSpace: "nowrap", opacity: rows.length ? 1 : 0.4 }}
+        >⤓ Excel</button>
+        <div style={{ fontSize: 12, fontWeight: 500, color: accent ?? "#8b949e", textAlign: "right", flex: 1 }}>{title}</div>
+      </div>
+      {status === "loading" ? (
+        <div style={{ fontSize: 12, color: "#8b949e", padding: "28px 0", textAlign: "center" }}>Fetching SKU sales…</div>
+      ) : status === "error" ? (
+        <div style={{ fontSize: 12, color: "#e34948", padding: "28px 0", textAlign: "center" }}>Couldn&apos;t load SKU sales for this window.</div>
+      ) : !top.length ? (
+        <div style={{ fontSize: 12, color: "#8b949e", padding: "28px 0", textAlign: "center" }}>No sales in this window.</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 10 }}>{fmt(totRev)} · {num(totUnits)} units · top {top.length} of {rows.length}</div>
+          {top.map((p, i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, gap: 8 }}>
+                <span style={{ color: "#8b949e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }} title={p.name}>{p.name}</span>
+                <span style={{ color: "#c9d1d9", fontWeight: 500, whiteSpace: "nowrap" }}>{fmt(p.revenue)} · {num(p.units)}u</span>
+              </div>
+              <div style={{ height: 3, background: "#0d1117", borderRadius: 2 }}>
+                <div style={{ height: 3, width: `${max ? (p.revenue / max) * 100 : 0}%`, background: accent ?? C.meta, borderRadius: 2 }} />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 // Static tab: renders baked-in HTML in an isolated iframe. Only mounts when its
 // tab is active, so it adds zero load to the live dashboard until clicked.
 function StaticTabFrame({ html, note }: { html: string; note: string }) {
@@ -162,10 +213,6 @@ function StaticTabFrame({ html, note }: { html: string; note: string }) {
   );
 }
 
-// ── Login screen ──────────────────────────────────────────────────────────────
-
-// ── Admin panel ───────────────────────────────────────────────────────────────
-
 // ── main page ─────────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [tab, setTab] = useState(0);
@@ -173,23 +220,11 @@ export default function Dashboard() {
   const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "live" | "error">("loading");
   const [lastFetched, setLastFetched] = useState<string>("");
 
-  // ── Auth / access control ──
-  const [grantedTabs, setGrantedTabs] = useState<string[]>([]);
-  const [role, setRole] = useState<string>("");
-  const [authChecked, setAuthChecked] = useState(true);
+  // Live SKU-level sales (Products tab) — fetched on demand for a rolling window.
+  const [skuDays, setSkuDays] = useState(90);
+  const [skuData, setSkuData] = useState<{ shopify: SkuRow[]; amazon: SkuRow[]; from: string; to: string } | null>(null);
+  const [skuStatus, setSkuStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
 
-  // Restore session on mount
-
-  const handleLogin = (key: string, tabs: string[], r: string, _label: string) => {
-    // Land on first allowed tab
-    const firstAllowed = ALL_TABS.find((t) => tabs.includes("*") || tabs.includes(t.id));
-    if (firstAllowed) setTab(firstAllowed.idx);
-  };
-
-  const handleLogout = () => {
-  };
-
-  // Which tabs this user may see
   const visibleTabs = ALL_TABS;
 
   // SWR for current month
@@ -236,6 +271,28 @@ export default function Dashboard() {
     await curMutate();
   }, [curMutate]);
 
+  // Fetch SKU-level sales the first time the Products tab is opened, and whenever
+  // the rolling window changes. Kept off the monthly snapshot because it's heavy.
+  useEffect(() => {
+    if (tab !== 3) return;
+    let cancelled = false;
+    const toD = new Date();
+    const fromD = new Date(toD.getTime() - (skuDays - 1) * 86400000);
+    const fmtD = (d: Date) => d.toISOString().split("T")[0];
+    setSkuStatus("loading");
+    fetch(`/api/skus?from=${fmtD(fromD)}&to=${fmtD(toD)}`)
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return;
+        if (j.ok) {
+          setSkuData({ shopify: j.shopify ?? [], amazon: j.amazon ?? [], from: j.from, to: j.to });
+          setSkuStatus("done");
+        } else setSkuStatus("error");
+      })
+      .catch(() => { if (!cancelled) setSkuStatus("error"); });
+    return () => { cancelled = true; };
+  }, [tab, skuDays]);
+
   // Merge baseline + live
   const allRows: MonthRow[] = (() => {
     const map: Record<string, MonthRow> = {};
@@ -247,13 +304,9 @@ export default function Dashboard() {
   })();
 
   const latestRow = allRows[allRows.length - 1] ?? ({} as MonthRow);
-  const totalRev  = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
-  const totalSpend= allRows.reduce((s, r) => s + (r.ad_spend    ?? 0), 0);
-
-  // Gate: wait for session check, then require login
-  if (!authChecked) {
-    return <div style={{ background: "#0d1117", minHeight: "100vh" }} />;
-  }
+  const totalRev   = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
+  const totalSpend = allRows.reduce((s, r) => s + (r.ad_spend    ?? 0), 0);
+  const totalOrders= allRows.reduce((s, r) => s + (r.orders      ?? 0), 0);
 
   return (
     <div style={{ background: "#0d1117", minHeight: "100vh", color: "#c9d1d9", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", paddingBottom: 48 }}>
@@ -298,27 +351,13 @@ export default function Dashboard() {
           >
             {fetchStatus === "loading" ? "Fetching…" : "↻ Refresh"}
           </button>
-          {role === "admin" && (
-            <button
-              title="Manage access keys and tab permissions"
-              style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#c9d1d9" }}
-            >
-              ⚙ Admin
-            </button>
-          )}
-          <button
-            onClick={handleLogout}
-            title="Log out"
-            style={{ fontSize: 12, padding: "5px 14px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e" }}
-          >
-            Log out
-          </button>
         </div>
       </div>
 
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, padding: "20px 24px 8px" }}>
         <KpiCard label="Total Shopify revenue" value={fmt(totalRev)} sub={`${allRows.length} months`} />
+        <KpiCard label="Total D2C orders" value={num(totalOrders)} sub="Shopify · all months" accent={C.shopify} />
         <KpiCard label="Total ad spend" value={fmt(totalSpend)} sub="Meta + Google" />
         <KpiCard label={`Latest buyers (${latestRow.month ?? "—"})`} value={num(latestRow.buyers ?? 0)} sub={`AOV ${fmt(latestRow.aov ?? 0)}`} />
         <KpiCard label="Latest hist LTV" value={fmt(latestRow.hist_ltv ?? 0)} sub={`${pct(latestRow.repeat_rate ?? 0)} repeat`} />
@@ -374,7 +413,7 @@ export default function Dashboard() {
                 </div>
               </ChartCard>
 
-              <ChartCard title="Shopify buyers per month" accent={C.shopify} filename="shopify_buyers" data={allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Orders: r.orders, Revenue: r.revenue }))}>
+              <ChartCard title="Shopify buyers & orders per month" accent={C.shopify} filename="shopify_buyers_orders" data={allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Orders: r.orders, Revenue: r.revenue }))}>
                 <div style={{ height: 240 }}>
                   <ResponsiveContainer>
                     <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
@@ -382,7 +421,9 @@ export default function Dashboard() {
                       <XAxis dataKey="month" tick={axStyle} tickLine={false} />
                       <YAxis tick={axStyle} tickLine={false} />
                       <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
                       <Bar dataKey="buyers" name="Buyers" fill={C.shopify} radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="orders" name="Orders" fill={C.aov} radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -593,6 +634,27 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </div>
             </ChartCard>
+
+            {/* Live SKU-level sales (₹) — D2C + Amazon, rolling window */}
+            <div style={{ background: "#161b22", border: "0.5px solid #58a6ff40", borderLeft: "3px solid #58a6ff", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#8b949e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <strong style={{ color: "#c9d1d9" }}>Live SKU sales (₹)</strong> — pulled fresh from Windsor for the selected window. Shopify grouped by product title; Amazon by child ASIN.
+                {skuData && <span> · {skuData.from} → {skuData.to}</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {skuStatus === "loading" && <StatusDot status="loading" />}
+                {skuStatus === "error" && <StatusDot status="error" />}
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[30, 90, 180].map(d => (
+                    <button key={d} onClick={() => setSkuDays(d)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${skuDays === d ? "#ff6b35" : "#30363d"}`, background: skuDays === d ? "#ff6b3522" : "transparent", color: skuDays === d ? "#ff6b35" : "#8b949e" }}>{d}d</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <SkuCard title="D2C (Shopify) sales by product" rows={skuData?.shopify ?? []} status={skuStatus} accent={C.shopify} filename="d2c_sku_sales" />
+              <SkuCard title="Amazon sales by SKU (ASIN)" rows={skuData?.amazon ?? []} status={skuStatus} accent={C.amazon} filename="amazon_sku_sales" />
+            </div>
           </div>
         )}
 
@@ -746,6 +808,126 @@ export default function Dashboard() {
                             <td style={{ padding: "4px 6px", textAlign: "right", color: "#c9d1d9", fontWeight: 500 }}>{fmt(rev)}</td>
                             <td style={{ padding: "4px 6px", textAlign: "right", color: bR >= 3 ? "#3fb950" : bR < 2 ? "#f85149" : "#c9d1d9" }}>{spend > 0 ? bR.toFixed(2) + "×" : "—"}</td>
                             <td style={{ padding: "4px 6px", textAlign: "right", color: !hasAz ? "#8b949e" : aR >= 3 ? "#3fb950" : aR < 1 ? "#f85149" : "#c9d1d9" }}>{hasAz ? aR.toFixed(2) + "×" : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── TAB 5: CAC & ROAS (Efficiency) ── */}
+        {tab === 5 && (() => {
+          const eff = allRows.map(r => {
+            const d2cSpend   = (r.meta_spend ?? 0) + (r.google_spend ?? 0);
+            const blendSpend = d2cSpend + (r.amazon_ads_spend ?? 0);
+            const d2cRev     = r.shopify_rev ?? 0;
+            const blendRev   = d2cRev + (r.amazon_sales ?? 0);
+            const r2 = (rev: number, sp: number) => (sp > 0 ? +roas(rev, sp).toFixed(2) : null);
+            return {
+              month: r.month,
+              d2c_cac_buyer: r.buyers ? Math.round(d2cSpend / r.buyers) : null,
+              d2c_cac_order: r.orders ? Math.round(d2cSpend / r.orders) : null,
+              d2c_roas:     r2(d2cRev, d2cSpend),
+              blended_roas: r2(blendRev, blendSpend),
+              meta_roas:    r.meta_revenue   != null ? r2(r.meta_revenue,   r.meta_spend   ?? 0) : null,
+              google_roas:  r.google_revenue != null ? r2(r.google_revenue, r.google_spend ?? 0) : null,
+              azads_roas:   (r.amazon_ads_spend ?? 0) > 0 ? r2(r.amazon_ads_sales ?? 0, r.amazon_ads_spend ?? 0) : null,
+              meta_cac:     (r.meta_purchases     ?? 0) > 0 ? Math.round((r.meta_spend   ?? 0) / (r.meta_purchases     as number)) : null,
+              google_cac:   (r.google_conversions ?? 0) > 0 ? Math.round((r.google_spend ?? 0) / (r.google_conversions as number)) : null,
+            };
+          });
+          const tD2cSpend   = allRows.reduce((s, r) => s + (r.meta_spend ?? 0) + (r.google_spend ?? 0), 0);
+          const tAzAdsSpend = allRows.reduce((s, r) => s + (r.amazon_ads_spend ?? 0), 0);
+          const tBlendSpend = tD2cSpend + tAzAdsSpend;
+          const tD2cRev     = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
+          const tBlendRev   = tD2cRev + allRows.reduce((s, r) => s + (r.amazon_sales ?? 0), 0);
+          const tBuyers     = allRows.reduce((s, r) => s + (r.buyers ?? 0), 0);
+          const tOrders     = allRows.reduce((s, r) => s + (r.orders ?? 0), 0);
+          const d2cRoas     = roas(tD2cRev, tD2cSpend);
+          const blendRoas   = roas(tBlendRev, tBlendSpend);
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ background: "#161b22", border: "0.5px solid #4a3aa740", borderLeft: "3px solid #4a3aa7", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#8b949e" }}>
+                <strong style={{ color: "#c9d1d9" }}>How these are computed.</strong> <b>D2C CAC</b> = (Meta + Google) spend ÷ new Shopify buyers (and ÷ orders) — the media that drives the D2C site. <b>D2C ROAS</b> = Shopify revenue ÷ (Meta + Google). <b>Blended ROAS</b> = (Shopify + Amazon SP) ÷ (Meta + Google + Amazon Ads). Per-channel ROAS/CAC (Meta, Google, Amazon Ads) show only for recent live months — the baked historical months don&apos;t carry platform-level revenue.
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <KpiCard label="D2C ROAS" value={d2cRoas.toFixed(2) + "×"} sub="Shopify ÷ (Meta+Google)" accent={d2cRoas >= 3 ? "#3fb950" : d2cRoas < 2 ? "#f85149" : undefined} />
+                <KpiCard label="Blended ROAS" value={blendRoas.toFixed(2) + "×"} sub="All rev ÷ all ad spend" accent={blendRoas >= 3 ? "#3fb950" : blendRoas < 2 ? "#f85149" : undefined} />
+                <KpiCard label="D2C CAC / buyer" value={tBuyers ? fmt(tD2cSpend / tBuyers) : "—"} sub={num(tBuyers) + " buyers"} accent={C.aov} />
+                <KpiCard label="D2C CAC / order" value={tOrders ? fmt(tD2cSpend / tOrders) : "—"} sub={num(tOrders) + " orders"} accent={C.aov} />
+              </div>
+
+              <ChartCard title="D2C CAC — per new buyer & per order" accent={C.aov} filename="d2c_cac_trend" data={eff.map(e => ({ Month: e.month, "CAC/buyer": e.d2c_cac_buyer, "CAC/order": e.d2c_cac_order }))}>
+                <div style={{ height: 280 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={eff} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" dataKey="d2c_cac_buyer" name="CAC / buyer" stroke={C.aov} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                      <Line type="monotone" dataKey="d2c_cac_order" name="CAC / order" stroke={C.meta} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" connectNulls />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartCard>
+
+              <ChartCard title="ROAS trends — D2C, Blended & per channel" accent={C.ltv} filename="roas_trends_all" data={eff.map(e => ({ Month: e.month, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Google ROAS": e.google_roas, "Amazon Ads ROAS": e.azads_roas }))}>
+                <div style={{ height: 300 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={eff} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                      <XAxis dataKey="month" tick={axStyle} tickLine={false} />
+                      <YAxis tick={axStyle} tickLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" dataKey="d2c_roas" name="D2C ROAS" stroke={C.shopify} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                      <Line type="monotone" dataKey="blended_roas" name="Blended ROAS" stroke="#a371f7" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                      <Line type="monotone" dataKey="meta_roas" name="Meta ROAS" stroke={C.meta} strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="4 2" connectNulls />
+                      <Line type="monotone" dataKey="google_roas" name="Google ROAS" stroke={C.google} strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="4 2" connectNulls />
+                      <Line type="monotone" dataKey="azads_roas" name="Amazon Ads ROAS" stroke={C.amazon} strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="4 2" connectNulls />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </ChartCard>
+
+              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px 14px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
+                  <button
+                    onClick={() => exportToExcel(eff.map(e => ({ Month: e.month, "CAC/buyer": e.d2c_cac_buyer, "CAC/order": e.d2c_cac_order, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Meta CAC": e.meta_cac, "Google ROAS": e.google_roas, "Google CAC": e.google_cac, "Amazon Ads ROAS": e.azads_roas })), "cac_roas_detail", "CAC & ROAS")}
+                    title="Download the full CAC & ROAS table as Excel"
+                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
+                  >⤓ Excel</button>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Monthly CAC & ROAS detail (last 12 months)</div>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        {["Month", "CAC/buyer", "CAC/order", "D2C ROAS", "Blended ROAS", "Meta ROAS", "Google ROAS", "Az Ads ROAS"].map(h => (
+                          <th key={h} style={{ padding: "4px 6px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eff.slice(-12).map(e => {
+                        const rc = (v: number | null, good = 3, bad = 2) => v == null ? "#8b949e" : v >= good ? "#3fb950" : v < bad ? "#f85149" : "#c9d1d9";
+                        return (
+                          <tr key={e.month} style={{ borderBottom: "0.5px solid #21262d" }}>
+                            <td style={{ padding: "4px 6px", color: "#8b949e" }}>{e.month}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{e.d2c_cac_buyer != null ? fmt(e.d2c_cac_buyer) : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right" }}>{e.d2c_cac_order != null ? fmt(e.d2c_cac_order) : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.d2c_roas) }}>{e.d2c_roas != null ? e.d2c_roas.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.blended_roas) }}>{e.blended_roas != null ? e.blended_roas.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.meta_roas) }}>{e.meta_roas != null ? e.meta_roas.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.google_roas) }}>{e.google_roas != null ? e.google_roas.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.azads_roas) }}>{e.azads_roas != null ? e.azads_roas.toFixed(2) + "×" : "—"}</td>
                           </tr>
                         );
                       })}

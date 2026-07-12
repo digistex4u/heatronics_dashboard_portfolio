@@ -52,6 +52,11 @@ function serializeRow(r: Snapshot): string {
     `amazon_ads_sd_spend:${n(r.amazon_ads_sd_spend)}`,
     `amazon_ads_sd_sales:${n(r.amazon_ads_sd_sales)}`,
   );
+  // Per-channel platform metrics (for Efficiency tab CAC/ROAS) — only when present.
+  if (r.meta_purchases != null)     parts.push(`meta_purchases:${n(r.meta_purchases)}`);
+  if (r.meta_revenue != null)       parts.push(`meta_revenue:${n(r.meta_revenue)}`);
+  if (r.google_conversions != null) parts.push(`google_conversions:${n(r.google_conversions)}`);
+  if (r.google_revenue != null)     parts.push(`google_revenue:${n(r.google_revenue)}`);
   return `  { ${parts.join(", ")} },`;
 }
 

@@ -9,6 +9,40 @@ const ACCOUNTS: Record<string, string> = {
   amazon_ads: "3416950968051210",   // HEATRONICS MEDICAL DEVICES (Amazon Ads)
 };
 
+// Friendly short labels for Amazon child ASINs (from merchant_listings item names).
+// Anything not listed falls back to the raw ASIN. Extend as the catalogue grows.
+const ASIN_LABELS: Record<string, string> = {
+  B0DF587RSS: "Cervical – Digital",
+  B0DF58D8D8: "Cervical – Analog",
+  B0CWXDVHZ2: "XL Back – Digital",
+  B0CZK44ZDP: "XL Back – Analog",
+  B0DMSVM4SN: "XL+ – Digital",
+  B0DM8VQDM7: "XL+ – Analog",
+  B0CZJZ3MJ5: "Knee – Digital",
+  B0CZKHM9ZW: "Knee – Analog",
+  B0CZKLB7D5: "KneePro+",
+  B0F6YJGG3N: "KneePro+ (new)",
+  B0CZL5RZ7H: "Foot Warmer – Digital",
+  B0CZKXYDLJ: "Foot Warmer – Analog",
+  B0F6YKL3P4: "Foot Warmer – UltraSoft+",
+  B0CZJYTVK7: "Period & Back – Digital",
+  B0D763Y4N9: "Period & Back – Analog",
+  B0CZK16SYF: "Regular Pad – Analog",
+  B0D1DYB98D: "Single Bed Warmer – Digital",
+  B0CV54SDCK: "Single Bed Warmer – Analog",
+  B0FVL81VXK: "Single Bed Warmer (new)",
+  B0DNZLR3XN: "Double Bed Warmer – Digital",
+  B0DNZLJR8W: "Double Bed Warmer – Analog",
+  B0DNZG4HYR: "Backrest Executive – Digital",
+  B0DNZJDND1: "Backrest Executive – Analog",
+  B0DNZN6XSD: "Backrest Regular – Digital",
+  B0DNZLXKSR: "Backrest Regular – Analog",
+  B0F6YR4H68: "Backrest hCore Rest",
+  B0F6YPLNWV: "Cervical Weighted+",
+  B0F6Y75N8L: "XL+ (new)",
+  B0F6YC8J2D: "Multipurpose+ Large",
+};
+
 interface WindsorRow {
   [key: string]: string | number | null;
 }
@@ -317,7 +351,7 @@ export async function fetchMonthSnapshot(yearMonth: string, opts: { amazonAdsTim
   ]);
 
   const m  = meta.status     === "fulfilled" ? meta.value     : { spend: 0, purchases: 0, revenue: 0 };
-  const g  = google.status   === "fulfilled" ? google.value   : { spend: 0, conversions: 0 };
+  const g  = google.status   === "fulfilled" ? google.value   : { spend: 0, conversions: 0, revenue: 0 };
   const sh = shopify.status  === "fulfilled" ? shopify.value  : { buyers: 0, orders: 0, revenue: 0, aov: 0, hist_ltv: 0, repeat_rate: 0 };
   const az = amazon.status   === "fulfilled" ? amazon.value   : { sales: 0, units: 0 };
   const azAds = amazonAds.status === "fulfilled" ? amazonAds.value : { spend: 0, sales: 0, clicks: 0, impressions: 0, sp_spend: 0, sp_sales: 0, sb_spend: 0, sb_sales: 0, sd_spend: 0, sd_sales: 0 };
@@ -347,10 +381,114 @@ export async function fetchMonthSnapshot(yearMonth: string, opts: { amazonAdsTim
     amazon_ads_sb_sales:    azAds.sb_sales,
     amazon_ads_sd_spend:    azAds.sd_spend,
     amazon_ads_sd_sales:    azAds.sd_sales,
-    // raw channel metrics
+    // raw channel metrics (used by the Efficiency tab for per-channel CAC/ROAS)
     meta_purchases:    m.purchases,
     meta_revenue:      m.revenue,
     google_conversions: g.conversions,
+    google_revenue:    (g as { revenue?: number }).revenue ?? 0,
     fetched_at:        new Date().toISOString(),
   };
+}
+
+// ── SKU-level sales (on-demand, not part of the monthly snapshot) ─────────────
+// These power the live SKU breakdowns on the Products tab. They pull line-item /
+// ASIN grain, which is heavy, so they are fetched only when that tab is opened
+// and are chunked into ~15-day windows to avoid connector timeouts.
+
+// Split [from,to] into <=15-day [from,to] chunks (inclusive).
+function dateChunks(dateFrom: string, dateTo: string, days = 15): [string, string][] {
+  const out: [string, string][] = [];
+  const end = new Date(dateTo);
+  let cur = new Date(dateFrom);
+  while (cur <= end) {
+    const chunkEnd = new Date(cur);
+    chunkEnd.setDate(chunkEnd.getDate() + days - 1);
+    const to = chunkEnd < end ? chunkEnd : end;
+    out.push([cur.toISOString().split("T")[0], to.toISOString().split("T")[0]]);
+    cur = new Date(to.getTime() + 86400000);
+    if (out.length > 40) break; // safety cap
+  }
+  return out;
+}
+
+export interface SkuRow { name: string; units: number; revenue: number; }
+
+// Shopify D2C sales by product (line-item grain). SKU field is blank in this
+// store, so products are grouped by line_item title. Revenue = net sales.
+export async function fetchShopifySkuSales(dateFrom: string, dateTo: string): Promise<SkuRow[]> {
+  const chunks = dateChunks(dateFrom, dateTo, 15);
+  const pull = async (from: string, to: string) => {
+    try {
+      return await windsorFetch(
+        "shopify",
+        ACCOUNTS.shopify,
+        ["line_item__title", "line_item__quantity", "line_item__net_sales"],
+        from,
+        to,
+        undefined,
+        { date_filters: JSON.stringify({ orders: "createdAt" }) },
+        60000
+      );
+    } catch {
+      return [];
+    }
+  };
+  const results = await Promise.all(chunks.map(([f, t]) => pull(f, t)));
+  const agg = new Map<string, SkuRow>();
+  for (const rows of results) {
+    for (const r of rows) {
+      const name = String(r.line_item__title ?? "").trim();
+      if (!name) continue;
+      const cur = agg.get(name) ?? { name, units: 0, revenue: 0 };
+      cur.units   += Number(r.line_item__quantity) || 0;
+      cur.revenue += Number(r.line_item__net_sales) || 0;
+      agg.set(name, cur);
+    }
+  }
+  return [...agg.values()]
+    .map(r => ({ ...r, units: Math.round(r.units), revenue: Math.round(r.revenue) }))
+    .filter(r => r.revenue > 0 || r.units > 0)
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+// Amazon Seller sales by child ASIN (salesbyasin grain), grouped and labelled.
+export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string): Promise<SkuRow[]> {
+  const chunks = dateChunks(dateFrom, dateTo, 15);
+  const pull = async (from: string, to: string) => {
+    try {
+      return await windsorFetch(
+        "amazon_sp",
+        ACCOUNTS.amazon,
+        [
+          "sales_and_traffic_report_by_date__childasin",
+          "sales_and_traffic_report_by_date__salesbyasin_orderedproductsales_amount",
+          "sales_and_traffic_report_by_date__salesbyasin_unitsordered",
+        ],
+        from,
+        to,
+        undefined,
+        undefined,
+        60000
+      );
+    } catch {
+      return [];
+    }
+  };
+  const results = await Promise.all(chunks.map(([f, t]) => pull(f, t)));
+  const agg = new Map<string, SkuRow & { asin: string }>();
+  for (const rows of results) {
+    for (const r of rows) {
+      const asin = String(r.sales_and_traffic_report_by_date__childasin ?? "").trim();
+      if (!asin) continue;
+      const name = ASIN_LABELS[asin] ?? asin;
+      const cur = agg.get(asin) ?? { asin, name, units: 0, revenue: 0 };
+      cur.revenue += Number(r.sales_and_traffic_report_by_date__salesbyasin_orderedproductsales_amount) || 0;
+      cur.units   += Number(r.sales_and_traffic_report_by_date__salesbyasin_unitsordered) || 0;
+      agg.set(asin, cur);
+    }
+  }
+  return [...agg.values()]
+    .map(({ name, units, revenue }) => ({ name, units: Math.round(units), revenue: Math.round(revenue) }))
+    .filter(r => r.revenue > 0 || r.units > 0)
+    .sort((a, b) => b.revenue - a.revenue);
 }
