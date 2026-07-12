@@ -137,7 +137,15 @@ npm run dev                     # http://localhost:3000
 - **SKU sales** (`/api/skus`) are pulled at line-item grain for Shopify (grouped by product
   title, since `line_item__sku` is blank in this store) and at ASIN grain for Amazon
   (`salesbyasin`), chunked into 15-day windows. ASINs are mapped to friendly names in
-  `lib/windsor.ts` (`ASIN_LABELS`) — add new ASINs there as the catalogue grows.
+  `lib/windsor.ts` (`ASIN_LABELS`) — add new ASINs there as the catalogue grows. A corrupt
+  Shopify line item (~1M units on one order) is filtered out at source via a row-level guard.
+- **Saved SKU baseline** (`lib/sku-baseline.ts`) is the SKU equivalent of `baseline.ts`: the
+  full history is pulled **once**, frozen, and served instantly on the Products tab ("Saved"
+  view). The 30 / 90 / 180-day buttons still pull live. Shopify is already baked in. To
+  (re)generate it — and to fill Amazon, whose connector is too slow to bulk-pull interactively —
+  run the one-time server-side job on the deployed site:
+  `GET /api/bake-skus?from=2025-08-01` with header `Authorization: Bearer <CRON_SECRET>`
+  (needs `GH_REPO_TOKEN`). It pulls both channels in small chunks and commits `sku-baseline.ts`.
 - **CAC & ROAS** blended figures cover all months; per-channel ROAS/CAC (Meta/Google/Amazon
   Ads) populate only for live months, since the baked historical baseline predates those
   richer per-channel fields.

@@ -415,8 +415,8 @@ export interface SkuRow { name: string; units: number; revenue: number; }
 
 // Shopify D2C sales by product (line-item grain). SKU field is blank in this
 // store, so products are grouped by line_item title. Revenue = net sales.
-export async function fetchShopifySkuSales(dateFrom: string, dateTo: string): Promise<SkuRow[]> {
-  const chunks = dateChunks(dateFrom, dateTo, 15);
+export async function fetchShopifySkuSales(dateFrom: string, dateTo: string, chunkDays = 15, timeoutMs = 60000): Promise<SkuRow[]> {
+  const chunks = dateChunks(dateFrom, dateTo, chunkDays);
   const pull = async (from: string, to: string) => {
     try {
       return await windsorFetch(
@@ -425,9 +425,12 @@ export async function fetchShopifySkuSales(dateFrom: string, dateTo: string): Pr
         ["line_item__title", "line_item__quantity", "line_item__net_sales"],
         from,
         to,
-        undefined,
+        // Row-level guard: drop any single line item with an absurd quantity
+        // (a corrupt ~1M-unit line exists in this store's data). B2C orders are
+        // never near this, so no legitimate sales are lost.
+        [["line_item__quantity", "lt", 50000]],
         { date_filters: JSON.stringify({ orders: "createdAt" }) },
-        60000
+        timeoutMs
       );
     } catch {
       return [];
@@ -452,8 +455,8 @@ export async function fetchShopifySkuSales(dateFrom: string, dateTo: string): Pr
 }
 
 // Amazon Seller sales by child ASIN (salesbyasin grain), grouped and labelled.
-export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string): Promise<SkuRow[]> {
-  const chunks = dateChunks(dateFrom, dateTo, 15);
+export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string, chunkDays = 15, timeoutMs = 60000): Promise<SkuRow[]> {
+  const chunks = dateChunks(dateFrom, dateTo, chunkDays);
   const pull = async (from: string, to: string) => {
     try {
       return await windsorFetch(
@@ -468,7 +471,7 @@ export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string): Pro
         to,
         undefined,
         undefined,
-        60000
+        timeoutMs
       );
     } catch {
       return [];

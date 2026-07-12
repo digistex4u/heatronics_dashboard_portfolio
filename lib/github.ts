@@ -85,6 +85,41 @@ export interface CommitResult {
   month?: string;
 }
 
+// Commit (create or update) an arbitrary repo file with new full contents.
+// Used by the SKU bake job to write lib/sku-baseline.ts. Never throws.
+export async function commitFileContents(path: string, content: string, message: string): Promise<CommitResult> {
+  try {
+    if (!process.env.GH_REPO_TOKEN) {
+      return { ok: false, skipped: true, reason: "GH_REPO_TOKEN not set" };
+    }
+    // Look up the existing sha (needed to update; absent means create).
+    let sha: string | undefined;
+    const getRes = await gh(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
+    if (getRes.ok) {
+      const meta = await getRes.json() as { sha?: string };
+      sha = meta.sha;
+    } else if (getRes.status !== 404) {
+      return { ok: false, skipped: true, reason: `GET ${getRes.status}` };
+    }
+    const putRes = await gh(`/repos/${REPO}/contents/${path}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message,
+        content: Buffer.from(content, "utf-8").toString("base64"),
+        branch: BRANCH,
+        ...(sha ? { sha } : {}),
+      }),
+    });
+    if (!putRes.ok) {
+      const txt = await putRes.text();
+      return { ok: false, skipped: false, reason: `PUT ${putRes.status}: ${txt.slice(0, 120)}` };
+    }
+    return { ok: true, committed: true };
+  } catch (err) {
+    return { ok: false, skipped: true, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // Insert one completed month into BASELINE. Idempotent: if the month is already
 // present the commit is skipped. Never throws — returns a status object.
 export async function appendMonthToBaseline(month: string, snapshot: Snapshot): Promise<CommitResult> {

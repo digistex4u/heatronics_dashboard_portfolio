@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { BASELINE, TOP_PRODUCTS, TOP_CITIES, STOCKOUT_MONTHS, MonthRow } from "../lib/baseline";
 import { STATIC_TABS } from "../lib/static-tabs";
+import { SHOPIFY_SKU_BASELINE, AMAZON_SKU_BASELINE, SKU_BASELINE_META } from "../lib/sku-baseline";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
@@ -151,8 +152,8 @@ function ChartCard({
 
 // Live SKU sales card: top products by rupee revenue with a bar + units, an
 // Excel export of the full list, and loading/empty/error states.
-function SkuCard({ title, rows, status, accent, filename }: {
-  title: string; rows: SkuRow[]; status: "idle" | "loading" | "done" | "error"; accent?: string; filename: string;
+function SkuCard({ title, rows, status, accent, filename, emptyNote }: {
+  title: string; rows: SkuRow[]; status: "idle" | "loading" | "done" | "error"; accent?: string; filename: string; emptyNote?: string;
 }) {
   const top = rows.slice(0, 12);
   const max = top.length ? top[0].revenue : 0;
@@ -174,7 +175,7 @@ function SkuCard({ title, rows, status, accent, filename }: {
       ) : status === "error" ? (
         <div style={{ fontSize: 12, color: "#e34948", padding: "28px 0", textAlign: "center" }}>Couldn&apos;t load SKU sales for this window.</div>
       ) : !top.length ? (
-        <div style={{ fontSize: 12, color: "#8b949e", padding: "28px 0", textAlign: "center" }}>No sales in this window.</div>
+        <div style={{ fontSize: 12, color: "#8b949e", padding: "28px 0", textAlign: "center" }}>{emptyNote ?? "No sales in this window."}</div>
       ) : (
         <>
           <div style={{ fontSize: 11, color: "#8b949e", marginBottom: 10 }}>{fmt(totRev)} · {num(totUnits)} units · top {top.length} of {rows.length}</div>
@@ -220,8 +221,9 @@ export default function Dashboard() {
   const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "live" | "error">("loading");
   const [lastFetched, setLastFetched] = useState<string>("");
 
-  // Live SKU-level sales (Products tab) — fetched on demand for a rolling window.
-  const [skuDays, setSkuDays] = useState(90);
+  // SKU-level sales (Products tab). Default view is the SAVED all-time baseline
+  // (frozen since Aug 2025, zero fetch); the 30/90/180-day options pull live.
+  const [skuView, setSkuView] = useState<"saved" | 30 | 90 | 180>("saved");
   const [skuData, setSkuData] = useState<{ shopify: SkuRow[]; amazon: SkuRow[]; from: string; to: string } | null>(null);
   const [skuStatus, setSkuStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
 
@@ -271,13 +273,13 @@ export default function Dashboard() {
     await curMutate();
   }, [curMutate]);
 
-  // Fetch SKU-level sales the first time the Products tab is opened, and whenever
-  // the rolling window changes. Kept off the monthly snapshot because it's heavy.
+  // Live SKU fetch — only for the rolling-window options (not the saved baseline),
+  // and only while the Products tab is open. Kept off the snapshot because heavy.
   useEffect(() => {
-    if (tab !== 3) return;
+    if (tab !== 3 || skuView === "saved") return;
     let cancelled = false;
     const toD = new Date();
-    const fromD = new Date(toD.getTime() - (skuDays - 1) * 86400000);
+    const fromD = new Date(toD.getTime() - (skuView - 1) * 86400000);
     const fmtD = (d: Date) => d.toISOString().split("T")[0];
     setSkuStatus("loading");
     fetch(`/api/skus?from=${fmtD(fromD)}&to=${fmtD(toD)}`)
@@ -291,7 +293,7 @@ export default function Dashboard() {
       })
       .catch(() => { if (!cancelled) setSkuStatus("error"); });
     return () => { cancelled = true; };
-  }, [tab, skuDays]);
+  }, [tab, skuView]);
 
   // Merge baseline + live
   const allRows: MonthRow[] = (() => {
@@ -307,6 +309,15 @@ export default function Dashboard() {
   const totalRev   = allRows.reduce((s, r) => s + (r.shopify_rev ?? 0), 0);
   const totalSpend = allRows.reduce((s, r) => s + (r.ad_spend    ?? 0), 0);
   const totalOrders= allRows.reduce((s, r) => s + (r.orders      ?? 0), 0);
+
+  // SKU rows to display: saved baseline (default) or the live window.
+  const skuIsSaved   = skuView === "saved";
+  const skuShopRows  = skuIsSaved ? SHOPIFY_SKU_BASELINE : (skuData?.shopify ?? []);
+  const skuAmzRows   = skuIsSaved ? AMAZON_SKU_BASELINE  : (skuData?.amazon ?? []);
+  const skuCardState: "idle" | "loading" | "done" | "error" = skuIsSaved ? "done" : skuStatus;
+  const skuRangeLabel = skuIsSaved
+    ? `${SKU_BASELINE_META.from} → ${SKU_BASELINE_META.to} · saved`
+    : (skuData ? `${skuData.from} → ${skuData.to} · live` : "");
 
   return (
     <div style={{ background: "#0d1117", minHeight: "100vh", color: "#c9d1d9", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", paddingBottom: 48 }}>
@@ -635,25 +646,28 @@ export default function Dashboard() {
               </div>
             </ChartCard>
 
-            {/* Live SKU-level sales (₹) — D2C + Amazon, rolling window */}
+            {/* SKU-level sales (₹) — D2C + Amazon. Saved all-time (default) or live window. */}
             <div style={{ background: "#161b22", border: "0.5px solid #58a6ff40", borderLeft: "3px solid #58a6ff", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#8b949e", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
               <div>
-                <strong style={{ color: "#c9d1d9" }}>Live SKU sales (₹)</strong> — pulled fresh from Windsor for the selected window. Shopify grouped by product title; Amazon by child ASIN.
-                {skuData && <span> · {skuData.from} → {skuData.to}</span>}
+                <strong style={{ color: "#c9d1d9" }}>SKU sales (₹)</strong> — {skuIsSaved
+                  ? <>saved once since Aug 2025, served instantly (no re-fetch). Shopify grouped by product; Amazon by ASIN.</>
+                  : <>pulled fresh from Windsor for the selected window.</>}
+                {skuRangeLabel && <span> · {skuRangeLabel}</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {skuStatus === "loading" && <StatusDot status="loading" />}
-                {skuStatus === "error" && <StatusDot status="error" />}
+                {!skuIsSaved && skuStatus === "loading" && <StatusDot status="loading" />}
+                {!skuIsSaved && skuStatus === "error" && <StatusDot status="error" />}
                 <div style={{ display: "flex", gap: 4 }}>
-                  {[30, 90, 180].map(d => (
-                    <button key={d} onClick={() => setSkuDays(d)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${skuDays === d ? "#ff6b35" : "#30363d"}`, background: skuDays === d ? "#ff6b3522" : "transparent", color: skuDays === d ? "#ff6b35" : "#8b949e" }}>{d}d</button>
+                  {([["saved", "Saved"], [30, "30d"], [90, "90d"], [180, "180d"]] as [("saved" | 30 | 90 | 180), string][]).map(([v, lbl]) => (
+                    <button key={String(v)} onClick={() => setSkuView(v)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${skuView === v ? "#ff6b35" : "#30363d"}`, background: skuView === v ? "#ff6b3522" : "transparent", color: skuView === v ? "#ff6b35" : "#8b949e" }}>{lbl}</button>
                   ))}
                 </div>
               </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <SkuCard title="D2C (Shopify) sales by product" rows={skuData?.shopify ?? []} status={skuStatus} accent={C.shopify} filename="d2c_sku_sales" />
-              <SkuCard title="Amazon sales by SKU (ASIN)" rows={skuData?.amazon ?? []} status={skuStatus} accent={C.amazon} filename="amazon_sku_sales" />
+              <SkuCard title="D2C (Shopify) sales by product" rows={skuShopRows} status={skuCardState} accent={C.shopify} filename="d2c_sku_sales" />
+              <SkuCard title="Amazon sales by SKU (ASIN)" rows={skuAmzRows} status={skuCardState} accent={C.amazon} filename="amazon_sku_sales"
+                emptyNote={skuIsSaved ? "Amazon history not baked yet — run /api/bake-skus once, or use a live window (30/90/180d)." : undefined} />
             </div>
           </div>
         )}
