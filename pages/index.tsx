@@ -743,10 +743,29 @@ export default function Dashboard() {
 
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Blended totals — composition of total spend and total revenue */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div style={{ background: "#161b22", border: "0.5px solid #21262d", borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.meta, marginBottom: 8 }}>Total blended spend</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}><tbody>
+                    <tr><td style={{ padding: "5px 0", color: "#8b949e" }}>Meta</td><td style={{ padding: "5px 0", textAlign: "right", color: "#c9d1d9" }}>{fmt(tMeta)}</td></tr>
+                    <tr><td style={{ padding: "5px 0", color: "#8b949e" }}>Google</td><td style={{ padding: "5px 0", textAlign: "right", color: "#c9d1d9" }}>{fmt(tGoogle)}</td></tr>
+                    <tr><td style={{ padding: "5px 0", color: "#8b949e" }}>Amazon Ads</td><td style={{ padding: "5px 0", textAlign: "right", color: "#c9d1d9" }}>{tAzAds > 0 ? fmt(tAzAds) : "—"}</td></tr>
+                    <tr style={{ borderTop: "1px solid #30363d" }}><td style={{ padding: "7px 0", color: "#fff", fontWeight: 700 }}>Total spend</td><td style={{ padding: "7px 0", textAlign: "right", color: "#fff", fontWeight: 700 }}>{fmt(tBlendSpend)}</td></tr>
+                  </tbody></table>
+                </div>
+                <div style={{ background: "#161b22", border: "0.5px solid #21262d", borderRadius: 10, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.shopify, marginBottom: 8 }}>Total blended revenue</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}><tbody>
+                    <tr><td style={{ padding: "5px 0", color: "#8b949e" }}>Shopify (D2C)</td><td style={{ padding: "5px 0", textAlign: "right", color: "#c9d1d9" }}>{fmt(tShopify)}</td></tr>
+                    <tr><td style={{ padding: "5px 0", color: "#8b949e" }}>Amazon SP (Seller)</td><td style={{ padding: "5px 0", textAlign: "right", color: "#c9d1d9" }}>{fmt(tAzSP)}</td></tr>
+                    <tr><td style={{ padding: "5px 0", color: "#586069" }}>&nbsp;</td><td style={{ padding: "5px 0" }}></td></tr>
+                    <tr style={{ borderTop: "1px solid #30363d" }}><td style={{ padding: "7px 0", color: "#fff", fontWeight: 700 }}>Total revenue</td><td style={{ padding: "7px 0", textAlign: "right", color: "#fff", fontWeight: 700 }}>{fmt(tBlendRev)}</td></tr>
+                  </tbody></table>
+                </div>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-                <KpiCard label="Blended spend" value={fmt(tBlendSpend)} sub="Meta + Google + Amazon Ads" />
-                <KpiCard label="Blended revenue" value={fmt(tBlendRev)} sub="Shopify + Amazon SP" />
-                <KpiCard label="Blended ROAS" value={blendRoas.toFixed(2) + "×"} sub="All revenue ÷ all spend" accent={blendRoas >= 3 ? "#3fb950" : blendRoas < 2 ? "#f85149" : undefined} />
+                <KpiCard label="Blended ROAS" value={blendRoas.toFixed(2) + "×"} sub="Total revenue ÷ total spend" accent={blendRoas >= 3 ? "#3fb950" : blendRoas < 2 ? "#f85149" : undefined} />
                 <KpiCard label="Amazon Ads ROAS" value={tAzAds > 0 ? azAdsRoas.toFixed(2) + "×" : "—"} sub={fmt(tAzAds) + " spend → " + fmt(tAzAdsSales) + " sales"} accent={C.amazon} />
               </div>
 
