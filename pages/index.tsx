@@ -8,7 +8,8 @@ import {
 } from "recharts";
 import { BASELINE, TOP_PRODUCTS, TOP_CITIES, STOCKOUT_MONTHS, MonthRow } from "../lib/baseline";
 import { STATIC_TABS } from "../lib/static-tabs";
-import { SHOPIFY_SKU_BASELINE, AMAZON_SKU_BASELINE, SKU_BASELINE_META } from "../lib/sku-baseline";
+import { SHOPIFY_SKU_BASELINE, AMAZON_CATEGORY_BASELINE, SKU_BASELINE_META } from "../lib/sku-baseline";
+import { PRODUCT_QUARTERLY, CITY_QUARTERLY, QUARTERLY_META, QRow } from "../lib/quarterly-baseline";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
@@ -196,6 +197,83 @@ function SkuCard({ title, rows, status, accent, filename, emptyNote }: {
   );
 }
 
+// Quarterly-share table: each quarter column shows the item's share (%) of that
+// quarter's total; the top 3 shares per quarter column are colour-highlighted.
+function QuarterlyCard({ title, data, meta, unit, accent, itemLabel, filename }: {
+  title: string;
+  data: { quarterTotals: number[]; rows: QRow[] };
+  meta: typeof QUARTERLY_META;
+  unit: "units" | "inr";
+  accent?: string;
+  itemLabel: string;
+  filename: string;
+}) {
+  const valFmt = (v: number) => (unit === "inr" ? fmt(v) : num(v));
+  const share = (v: number, c: number) => (data.quarterTotals[c] ? (v / data.quarterTotals[c]) * 100 : 0);
+  // Per quarter column, rank rows by value → top-3 get highlighted.
+  const ranks = [0, 1, 2, 3].map((c) => {
+    const m: Record<number, number> = {};
+    data.rows.map((r, i) => [i, r.q[c]] as [number, number]).sort((a, b) => b[1] - a[1])
+      .slice(0, 3).forEach(([i], rk) => { m[i] = rk; });
+    return m;
+  });
+  const hiStyle = (rk: number | undefined): React.CSSProperties =>
+    rk === 0 ? { background: "rgba(63,185,80,0.30)", color: "#3fb950", fontWeight: 700 } :
+    rk === 1 ? { background: "rgba(63,185,80,0.17)", color: "#3fb950", fontWeight: 600 } :
+    rk === 2 ? { background: "rgba(63,185,80,0.08)", color: "#7ee08a" } : { color: "#8b949e" };
+
+  const exportRows = data.rows.map((r) => {
+    const o: Record<string, any> = { [itemLabel]: r.name };
+    meta.quarters.forEach((q, c) => {
+      o[`${q} (${unit === "inr" ? "₹" : "units"})`] = r.q[c];
+      o[`${q} %`] = +share(r.q[c], c).toFixed(1);
+    });
+    o["Total"] = r.total;
+    return o;
+  });
+
+  return (
+    <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px", overflowX: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+        <button onClick={() => exportToExcel(exportRows, filename, title)} title="Download as Excel"
+          style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", whiteSpace: "nowrap" }}>⤓ Excel</button>
+        <div style={{ fontSize: 12, fontWeight: 500, color: accent ?? "#8b949e", textAlign: "right", flex: 1 }}>{title}</div>
+      </div>
+      <div style={{ fontSize: 10.5, color: "#6e7681", marginBottom: 10 }}>Each quarter column = share of that quarter&apos;s total. Top 3 per quarter highlighted. {meta.from} → {meta.to}.</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, minWidth: 560 }}>
+        <thead>
+          <tr>
+            <th style={{ padding: "5px 8px", textAlign: "left", borderBottom: "1px solid #30363d", color: "#8b949e", fontWeight: 500 }}>{itemLabel}</th>
+            {meta.quarters.map((q, c) => (
+              <th key={q} style={{ padding: "5px 8px", textAlign: "right", borderBottom: "1px solid #30363d", color: "#8b949e", fontWeight: 500 }}>
+                {q}<div style={{ fontSize: 10, color: "#6e7681" }}>{valFmt(data.quarterTotals[c])}</div>
+                <div style={{ fontSize: 9, color: "#586069" }}>{meta.quarterMonths[c]}</div>
+              </th>
+            ))}
+            <th style={{ padding: "5px 8px", textAlign: "right", borderBottom: "1px solid #30363d", color: "#c9d1d9", fontWeight: 600 }}>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((r, i) => (
+            <tr key={r.name}>
+              <td style={{ padding: "5px 8px", borderBottom: "0.5px solid #21262d", color: "#c9d1d9", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 190 }} title={r.name}>{r.name}</td>
+              {[0, 1, 2, 3].map((c) => {
+                const p = share(r.q[c], c);
+                return (
+                  <td key={c} title={valFmt(r.q[c])} style={{ padding: "5px 8px", textAlign: "right", borderBottom: "0.5px solid #21262d", ...hiStyle(ranks[c][i]) }}>
+                    {p >= 0.05 ? p.toFixed(1) + "%" : "—"}
+                  </td>
+                );
+              })}
+              <td style={{ padding: "5px 8px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#c9d1d9", fontWeight: 600, whiteSpace: "nowrap" }}>{valFmt(r.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Static tab: renders baked-in HTML in an isolated iframe. Only mounts when its
 // tab is active, so it adds zero load to the live dashboard until clicked.
 function StaticTabFrame({ html, note }: { html: string; note: string }) {
@@ -313,7 +391,8 @@ export default function Dashboard() {
   // SKU rows to display: saved baseline (default) or the live window.
   const skuIsSaved   = skuView === "saved";
   const skuShopRows  = skuIsSaved ? SHOPIFY_SKU_BASELINE : (skuData?.shopify ?? []);
-  const skuAmzRows   = skuIsSaved ? AMAZON_SKU_BASELINE  : (skuData?.amazon ?? []);
+  // Saved view shows Amazon rolled up to categories; live windows stay per-ASIN.
+  const skuAmzRows   = skuIsSaved ? AMAZON_CATEGORY_BASELINE : (skuData?.amazon ?? []);
   const skuCardState: "idle" | "loading" | "done" | "error" = skuIsSaved ? "done" : skuStatus;
   const skuRangeLabel = skuIsSaved
     ? `${SKU_BASELINE_META.from} → ${SKU_BASELINE_META.to} · saved`
@@ -424,18 +503,19 @@ export default function Dashboard() {
                 </div>
               </ChartCard>
 
-              <ChartCard title="Shopify buyers & orders per month" accent={C.shopify} filename="shopify_buyers_orders" data={allRows.map(r => ({ Month: r.month, Buyers: r.buyers, Orders: r.orders, Revenue: r.revenue }))}>
+              <ChartCard title="Shopify orders & total sales per month" accent={C.shopify} filename="shopify_orders_sales" data={allRows.map(r => ({ Month: r.month, Orders: r.orders, "Total Sales": r.shopify_rev }))}>
                 <div style={{ height: 240 }}>
                   <ResponsiveContainer>
-                    <BarChart data={allRows} margin={{ top: 4, right: 8, bottom: 4, left: 4 }}>
+                    <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                       <XAxis dataKey="month" tick={axStyle} tickLine={false} />
-                      <YAxis tick={axStyle} tickLine={false} />
+                      <YAxis yAxisId="l" tick={axStyle} tickLine={false} />
+                      <YAxis yAxisId="r" orientation="right" tick={axStyle} tickLine={false} tickFormatter={fmt} />
                       <Tooltip content={<CustomTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="buyers" name="Buyers" fill={C.shopify} radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="orders" name="Orders" fill={C.aov} radius={[3, 3, 0, 0]} />
-                    </BarChart>
+                      <Bar yAxisId="l" dataKey="orders" name="Orders" fill={C.aov} radius={[3, 3, 0, 0]} />
+                      <Line yAxisId="r" type="monotone" dataKey="shopify_rev" name="Total sales" stroke={C.shopify} strokeWidth={2.5} dot={{ r: 3 }} />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               </ChartCard>
@@ -520,7 +600,7 @@ export default function Dashboard() {
               <strong style={{ color: "#c9d1d9" }}>No halo effect from ads → Amazon.</strong> Correlation r ≈ −0.7 (opposite directions). Spend drives Shopify (own site) not Amazon (reseller). Jan–Feb 2026 Amazon shows a stockout cliff ⚠ — not an ad effect.
             </div>
 
-            <ChartCard title="Amazon sales vs total ad spend & Shopify" accent={C.amazon} filename="amazon_vs_ads" data={allRows.map(r => ({ Month: r.month, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev }))}>
+            <ChartCard title="Monthly sales vs ad spend — Amazon (Seller) & Shopify (Total sales) vs Meta+Google spend" accent={C.amazon} filename="amazon_vs_ads" data={allRows.map(r => ({ Month: r.month, "Amazon sales (Seller) ₹": r.amazon_sales, "Amazon units": r.amazon_units, "Meta spend ₹": r.meta_spend, "Google spend ₹": r.google_spend, "Ad spend total (Meta+Google) ₹": r.ad_spend, "Shopify sales (Total) ₹": r.shopify_rev }))}>
               <div style={{ height: 310 }}>
                 <ResponsiveContainer>
                   <ComposedChart data={allRows} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
@@ -530,9 +610,9 @@ export default function Dashboard() {
                     <YAxis yAxisId="r" orientation="right" tick={axStyle} tickLine={false} tickFormatter={fmt} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar yAxisId="l" dataKey="ad_spend" name="Ad spend" fill={C.meta} opacity={0.55} radius={[3, 3, 0, 0]} />
-                    <Line yAxisId="r" type="monotone" dataKey="amazon_sales" name="Amazon" stroke={C.amazon} strokeWidth={2.5} dot={{ r: 3 }} />
-                    <Line yAxisId="r" type="monotone" dataKey="shopify_rev" name="Shopify" stroke={C.shopify} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
+                    <Bar yAxisId="l" dataKey="ad_spend" name="Ad spend · Meta + Google" fill={C.meta} opacity={0.55} radius={[3, 3, 0, 0]} />
+                    <Line yAxisId="r" type="monotone" dataKey="amazon_sales" name="Amazon sales · Seller (SP)" stroke={C.amazon} strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line yAxisId="r" type="monotone" dataKey="shopify_rev" name="Shopify sales · Total" stroke={C.shopify} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -541,7 +621,7 @@ export default function Dashboard() {
             <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "12px 16px", overflowX: "auto" }}>
               <div style={{ marginBottom: 8 }}>
                 <button
-                  onClick={() => exportToExcel(allRows.map(r => ({ Month: r.month, "Amazon Sales": r.amazon_sales, "Amazon Units": r.amazon_units, "Meta Spend": r.meta_spend, "Google Spend": r.google_spend, "Total Ad Spend": r.ad_spend, "Shopify Revenue": r.shopify_rev, Stockout: STOCKOUT_MONTHS.includes(r.month) ? "YES" : "" })), "amazon_vs_ads_table", "Amazon vs Ads")}
+                  onClick={() => exportToExcel(allRows.map(r => ({ Month: r.month, "Amazon sales (Seller) ₹": r.amazon_sales, "Amazon units": r.amazon_units, "Meta spend ₹": r.meta_spend, "Google spend ₹": r.google_spend, "Ad spend total (Meta+Google) ₹": r.ad_spend, "Shopify sales (Total) ₹": r.shopify_rev, Stockout: STOCKOUT_MONTHS.includes(r.month) ? "YES" : "" })), "amazon_vs_ads_table", "Amazon vs Ads")}
                   title="Download full Amazon vs Ads table as Excel"
                   style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
                 >⤓ Excel</button>
@@ -549,7 +629,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
                   <tr>
-                    {["Month", "Amazon ₹", "Units", "Meta ₹", "Google ₹", "Ad total ₹", "Shopify ₹"].map(h => (
+                    {["Month", "Amazon sales ₹", "Units", "Meta spend ₹", "Google spend ₹", "Ad spend total ₹", "Shopify sales ₹"].map(h => (
                       <th key={h} style={{ padding: "4px 8px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
                     ))}
                   </tr>
@@ -578,57 +658,16 @@ export default function Dashboard() {
         {/* ── TAB 3: Products & Cities ── */}
         {tab === 3 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8 }}>
-                  <button
-                    onClick={() => exportToExcel(TOP_PRODUCTS.map(p => ({ Product: p.product, Units: p.units })), "top_products", "Top Products")}
-                    title="Download top products as Excel"
-                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
-                  >⤓ Excel</button>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Top products by units (Aug 2025 – May 2026)</div>
-                </div>
-                {TOP_PRODUCTS.map((p, i) => {
-                  const max = TOP_PRODUCTS[0].units;
-                  return (
-                    <div key={i} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                        <span style={{ color: "#8b949e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "74%" }}>{p.product}</span>
-                        <span style={{ color: "#c9d1d9", fontWeight: 500 }}>{num(p.units)}</span>
-                      </div>
-                      <div style={{ height: 3, background: "#0d1117", borderRadius: 2 }}>
-                        <div style={{ height: 3, width: `${(p.units / max) * 100}%`, background: C.meta, borderRadius: 2 }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8 }}>
-                  <button
-                    onClick={() => exportToExcel(TOP_CITIES.map(c => ({ City: c.city, Revenue: c.revenue })), "top_cities", "Top Cities")}
-                    title="Download top cities as Excel"
-                    style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
-                  >⤓ Excel</button>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "#8b949e", textAlign: "right", flex: 1 }}>Top cities by revenue</div>
-                </div>
-                {TOP_CITIES.map((c, i) => {
-                  const max = TOP_CITIES[0].revenue;
-                  return (
-                    <div key={i} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                        <span style={{ color: "#8b949e" }}>{c.city}</span>
-                        <span style={{ color: "#c9d1d9", fontWeight: 500 }}>{fmt(c.revenue)}</span>
-                      </div>
-                      <div style={{ height: 3, background: "#0d1117", borderRadius: 2 }}>
-                        <div style={{ height: 3, width: `${(c.revenue / max) * 100}%`, background: C.shopify, borderRadius: 2 }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <QuarterlyCard
+              title="Top products by units — quarterly share"
+              data={PRODUCT_QUARTERLY} meta={QUARTERLY_META} unit="units"
+              accent={C.meta} itemLabel="Product" filename="products_quarterly_share"
+            />
+            <QuarterlyCard
+              title="Top cities by net sales — quarterly share"
+              data={CITY_QUARTERLY} meta={QUARTERLY_META} unit="inr"
+              accent={C.shopify} itemLabel="City" filename="cities_quarterly_share"
+            />
 
             <ChartCard title="Avg products & units per customer (monthly cohorts)" accent="#8b949e" filename="avg_products_units" data={allRows.map(r => ({ Month: r.month, "Avg Products/Customer": r.avg_products, "Avg Units/Customer": r.avg_units }))}>
               <div style={{ height: 220 }}>
@@ -666,8 +705,8 @@ export default function Dashboard() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <SkuCard title="D2C (Shopify) sales by product" rows={skuShopRows} status={skuCardState} accent={C.shopify} filename="d2c_sku_sales" />
-              <SkuCard title="Amazon sales by SKU (ASIN)" rows={skuAmzRows} status={skuCardState} accent={C.amazon} filename="amazon_sku_sales"
-                emptyNote={skuIsSaved ? "Amazon history not baked yet — run /api/bake-skus once, or use a live window (30/90/180d)." : undefined} />
+              <SkuCard title={skuIsSaved ? "Amazon sales by category" : "Amazon sales by SKU (ASIN)"} rows={skuAmzRows} status={skuCardState} accent={C.amazon} filename={skuIsSaved ? "amazon_category_sales" : "amazon_sku_sales"}
+                emptyNote={skuIsSaved ? "Amazon category history not baked yet — run /api/bake-skus once on the deployed site." : undefined} />
             </div>
           </div>
         )}

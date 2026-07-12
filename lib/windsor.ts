@@ -43,6 +43,28 @@ const ASIN_LABELS: Record<string, string> = {
   B0F6YC8J2D: "Multipurpose+ Large",
 };
 
+// Roll each Amazon child ASIN up to one of 7 product categories. Amazon SP has no
+// category field on the sales report, so this mapping is how "Amazon by category"
+// is produced. Unmapped ASINs fall into "Other".
+const ASIN_CATEGORY: Record<string, string> = {
+  // Cervical / Neck
+  B0DF587RSS: "Cervical / Neck", B0DF58D8D8: "Cervical / Neck", B0F6YPLNWV: "Cervical / Neck",
+  // XL Back & Full Body
+  B0CWXDVHZ2: "XL Back & Full Body", B0CZK44ZDP: "XL Back & Full Body", B0DMSVM4SN: "XL Back & Full Body",
+  B0DM8VQDM7: "XL Back & Full Body", B0F6Y75N8L: "XL Back & Full Body", B0F6YC8J2D: "XL Back & Full Body",
+  // Knee
+  B0CZJZ3MJ5: "Knee", B0CZKHM9ZW: "Knee", B0CZKLB7D5: "Knee", B0F6YJGG3N: "Knee",
+  // Foot Warmer
+  B0CZL5RZ7H: "Foot Warmer", B0CZKXYDLJ: "Foot Warmer", B0F6YKL3P4: "Foot Warmer",
+  // Bed Warmer (Single + Double)
+  B0D1DYB98D: "Bed Warmer", B0CV54SDCK: "Bed Warmer", B0FVL81VXK: "Bed Warmer",
+  B0DNZLR3XN: "Bed Warmer", B0DNZLJR8W: "Bed Warmer",
+  // Backrest
+  B0DNZG4HYR: "Backrest", B0DNZJDND1: "Backrest", B0DNZN6XSD: "Backrest", B0DNZLXKSR: "Backrest", B0F6YR4H68: "Backrest",
+  // Period / Regular Pad
+  B0CZJYTVK7: "Period / Regular Pad", B0D763Y4N9: "Period / Regular Pad", B0CZK16SYF: "Period / Regular Pad",
+};
+
 interface WindsorRow {
   [key: string]: string | number | null;
 }
@@ -455,7 +477,9 @@ export async function fetchShopifySkuSales(dateFrom: string, dateTo: string, chu
 }
 
 // Amazon Seller sales by child ASIN (salesbyasin grain), grouped and labelled.
-export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string, chunkDays = 15, timeoutMs = 60000): Promise<SkuRow[]> {
+// Pull Amazon Seller sales once at child-ASIN grain and aggregate → Map<asin,{units,revenue}>.
+// Both the SKU view and the category rollup are built from this single pull.
+async function pullAmazonAsin(dateFrom: string, dateTo: string, chunkDays: number, timeoutMs: number): Promise<Map<string, { units: number; revenue: number }>> {
   const chunks = dateChunks(dateFrom, dateTo, chunkDays);
   const pull = async (from: string, to: string) => {
     try {
@@ -467,31 +491,52 @@ export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string, chun
           "sales_and_traffic_report_by_date__salesbyasin_orderedproductsales_amount",
           "sales_and_traffic_report_by_date__salesbyasin_unitsordered",
         ],
-        from,
-        to,
-        undefined,
-        undefined,
-        timeoutMs
+        from, to, undefined, undefined, timeoutMs
       );
     } catch {
       return [];
     }
   };
   const results = await Promise.all(chunks.map(([f, t]) => pull(f, t)));
-  const agg = new Map<string, SkuRow & { asin: string }>();
+  const agg = new Map<string, { units: number; revenue: number }>();
   for (const rows of results) {
     for (const r of rows) {
       const asin = String(r.sales_and_traffic_report_by_date__childasin ?? "").trim();
       if (!asin) continue;
-      const name = ASIN_LABELS[asin] ?? asin;
-      const cur = agg.get(asin) ?? { asin, name, units: 0, revenue: 0 };
+      const cur = agg.get(asin) ?? { units: 0, revenue: 0 };
       cur.revenue += Number(r.sales_and_traffic_report_by_date__salesbyasin_orderedproductsales_amount) || 0;
       cur.units   += Number(r.sales_and_traffic_report_by_date__salesbyasin_unitsordered) || 0;
       agg.set(asin, cur);
     }
   }
-  return [...agg.values()]
-    .map(({ name, units, revenue }) => ({ name, units: Math.round(units), revenue: Math.round(revenue) }))
+  return agg;
+}
+
+const rollup = (m: Map<string, { units: number; revenue: number }>, key: (asin: string) => string): SkuRow[] => {
+  const out = new Map<string, SkuRow>();
+  for (const [asin, v] of m) {
+    const name = key(asin);
+    const cur = out.get(name) ?? { name, units: 0, revenue: 0 };
+    cur.units += v.units; cur.revenue += v.revenue;
+    out.set(name, cur);
+  }
+  return [...out.values()]
+    .map(r => ({ name: r.name, units: Math.round(r.units), revenue: Math.round(r.revenue) }))
     .filter(r => r.revenue > 0 || r.units > 0)
     .sort((a, b) => b.revenue - a.revenue);
+};
+
+// Amazon sales by SKU (child ASIN → friendly label). Used by the live /api/skus.
+export async function fetchAmazonSkuSales(dateFrom: string, dateTo: string, chunkDays = 15, timeoutMs = 60000): Promise<SkuRow[]> {
+  const agg = await pullAmazonAsin(dateFrom, dateTo, chunkDays, timeoutMs);
+  return rollup(agg, asin => ASIN_LABELS[asin] ?? asin);
+}
+
+// Amazon sales by SKU *and* by category from a single pull. Used by the bake job.
+export async function fetchAmazonBreakdown(dateFrom: string, dateTo: string, chunkDays = 7, timeoutMs = 90000): Promise<{ skus: SkuRow[]; categories: SkuRow[] }> {
+  const agg = await pullAmazonAsin(dateFrom, dateTo, chunkDays, timeoutMs);
+  return {
+    skus: rollup(agg, asin => ASIN_LABELS[asin] ?? asin),
+    categories: rollup(agg, asin => ASIN_CATEGORY[asin] ?? "Other"),
+  };
 }

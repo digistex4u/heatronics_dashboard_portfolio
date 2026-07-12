@@ -82,3 +82,8 @@ export const SHOPIFY_SKU_BASELINE: SkuRow[] = [
 // interactively). Until then the Products tab falls back to a live window for Amazon.
 export const AMAZON_SKU_BASELINE: SkuRow[] = [
 ];
+
+// Amazon rolled up to 7 product categories (Amazon SP has no category field, so
+// ASINs are mapped in lib/windsor.ts). Filled by the same /api/bake-skus job.
+export const AMAZON_CATEGORY_BASELINE: SkuRow[] = [
+];
