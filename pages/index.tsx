@@ -863,20 +863,25 @@ export default function Dashboard() {
           const tOrders     = allRows.reduce((s, r) => s + (r.orders ?? 0), 0);
           const d2cRoas     = roas(tD2cRev, tD2cSpend);
           const blendRoas   = roas(tBlendRev, tBlendSpend);
+          // A per-channel ROAS above this is almost certainly a tracking error at
+          // source (e.g. Google conversion-value glitches), not real — hide it.
+          const ROAS_CAP = 50;
+          const capRoas = (v: number | null) => (v != null && v > ROAS_CAP ? null : v);
+          const effRoas = eff.map(e => ({ ...e, meta_roas: capRoas(e.meta_roas), google_roas: capRoas(e.google_roas), azads_roas: capRoas(e.azads_roas) }));
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ background: "#161b22", border: "0.5px solid #4a3aa740", borderLeft: "3px solid #4a3aa7", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#8b949e" }}>
-                <strong style={{ color: "#c9d1d9" }}>How these are computed.</strong> <b>D2C CAC</b> = (Meta + Google) spend ÷ new Shopify buyers (and ÷ orders) — the media that drives the D2C site. <b>D2C ROAS</b> = Shopify revenue ÷ (Meta + Google). <b>Blended ROAS</b> = (Shopify + Amazon SP) ÷ (Meta + Google + Amazon Ads). Per-channel ROAS/CAC (Meta, Google, Amazon Ads) show only for recent live months — the baked historical months don&apos;t carry platform-level revenue.
+                <strong style={{ color: "#c9d1d9" }}>How these are computed.</strong> <b>CAC / new buyer</b> = (Meta + Google) spend ÷ <i>first-time</i> Shopify buyers that month; <b>CAC / order</b> divides the same spend by <i>all</i> orders. CAC / new buyer spikes in slow-acquisition months (e.g. off-season) even when orders hold up — CAC / order is the steadier read. <b>D2C ROAS</b> = Shopify revenue ÷ (Meta + Google). <b>Blended ROAS</b> = (Shopify + Amazon SP) ÷ (Meta + Google + Amazon Ads); pre-2026 months read high because Amazon&apos;s largely-organic marketplace sales are divided by small early ad budgets. Per-channel ROAS/CAC show only for recent live months, and any per-channel ROAS above {ROAS_CAP}× is hidden as a likely tracking error (e.g. a Google conversion-value glitch).
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                 <KpiCard label="D2C ROAS" value={d2cRoas.toFixed(2) + "×"} sub="Shopify ÷ (Meta+Google)" accent={d2cRoas >= 3 ? "#3fb950" : d2cRoas < 2 ? "#f85149" : undefined} />
                 <KpiCard label="Blended ROAS" value={blendRoas.toFixed(2) + "×"} sub="All rev ÷ all ad spend" accent={blendRoas >= 3 ? "#3fb950" : blendRoas < 2 ? "#f85149" : undefined} />
-                <KpiCard label="D2C CAC / buyer" value={tBuyers ? fmt(tD2cSpend / tBuyers) : "—"} sub={num(tBuyers) + " buyers"} accent={C.aov} />
-                <KpiCard label="D2C CAC / order" value={tOrders ? fmt(tD2cSpend / tOrders) : "—"} sub={num(tOrders) + " orders"} accent={C.aov} />
+                <KpiCard label="CAC / new buyer" value={tBuyers ? fmt(tD2cSpend / tBuyers) : "—"} sub={num(tBuyers) + " new buyers"} accent={C.aov} />
+                <KpiCard label="CAC / order" value={tOrders ? fmt(tD2cSpend / tOrders) : "—"} sub={num(tOrders) + " orders"} accent={C.aov} />
               </div>
 
-              <ChartCard title="D2C CAC — per new buyer & per order" accent={C.aov} filename="d2c_cac_trend" data={eff.map(e => ({ Month: e.month, "CAC/buyer": e.d2c_cac_buyer, "CAC/order": e.d2c_cac_order }))}>
+              <ChartCard title="D2C CAC — per new buyer vs per order" accent={C.aov} filename="d2c_cac_trend" data={eff.map(e => ({ Month: e.month, "CAC / new buyer": e.d2c_cac_buyer, "CAC / order": e.d2c_cac_order }))}>
                 <div style={{ height: 280 }}>
                   <ResponsiveContainer>
                     <LineChart data={eff} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
@@ -885,17 +890,17 @@ export default function Dashboard() {
                       <YAxis tick={axStyle} tickLine={false} tickFormatter={fmt} />
                       <Tooltip content={<CustomTooltip />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="d2c_cac_buyer" name="CAC / buyer" stroke={C.aov} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+                      <Line type="monotone" dataKey="d2c_cac_buyer" name="CAC / new buyer" stroke={C.aov} strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
                       <Line type="monotone" dataKey="d2c_cac_order" name="CAC / order" stroke={C.meta} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </ChartCard>
 
-              <ChartCard title="ROAS trends — D2C, Blended & per channel" accent={C.ltv} filename="roas_trends_all" data={eff.map(e => ({ Month: e.month, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Google ROAS": e.google_roas, "Amazon Ads ROAS": e.azads_roas }))}>
+              <ChartCard title="ROAS trends — D2C, Blended & per channel (per-channel >50× hidden as tracking errors)" accent={C.ltv} filename="roas_trends_all" data={effRoas.map(e => ({ Month: e.month, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Google ROAS": e.google_roas, "Amazon Ads ROAS": e.azads_roas }))}>
                 <div style={{ height: 300 }}>
                   <ResponsiveContainer>
-                    <LineChart data={eff} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+                    <LineChart data={effRoas} margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                       <XAxis dataKey="month" tick={axStyle} tickLine={false} />
                       <YAxis tick={axStyle} tickLine={false} />
@@ -914,7 +919,7 @@ export default function Dashboard() {
               <div style={{ background: "#161b22", borderRadius: 10, border: "0.5px solid #21262d", padding: "16px 14px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
                   <button
-                    onClick={() => exportToExcel(eff.map(e => ({ Month: e.month, "CAC/buyer": e.d2c_cac_buyer, "CAC/order": e.d2c_cac_order, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Meta CAC": e.meta_cac, "Google ROAS": e.google_roas, "Google CAC": e.google_cac, "Amazon Ads ROAS": e.azads_roas })), "cac_roas_detail", "CAC & ROAS")}
+                    onClick={() => exportToExcel(effRoas.map(e => ({ Month: e.month, "CAC / new buyer": e.d2c_cac_buyer, "CAC / order": e.d2c_cac_order, "D2C ROAS": e.d2c_roas, "Blended ROAS": e.blended_roas, "Meta ROAS": e.meta_roas, "Meta CAC": e.meta_cac, "Google ROAS": e.google_roas, "Google CAC": e.google_cac, "Amazon Ads ROAS": e.azads_roas })), "cac_roas_detail", "CAC & ROAS")}
                     title="Download the full CAC & ROAS table as Excel"
                     style={{ fontSize: 11, padding: "3px 9px", cursor: "pointer", borderRadius: 6, border: "1px solid #30363d", background: "transparent", color: "#8b949e", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}
                   >⤓ Excel</button>
@@ -924,7 +929,7 @@ export default function Dashboard() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                     <thead>
                       <tr>
-                        {["Month", "CAC/buyer", "CAC/order", "D2C ROAS", "Blended ROAS", "Meta ROAS", "Google ROAS", "Az Ads ROAS"].map(h => (
+                        {["Month", "CAC / new buyer", "CAC / order", "D2C ROAS", "Blended ROAS", "Meta ROAS", "Google ROAS", "Az Ads ROAS"].map(h => (
                           <th key={h} style={{ padding: "4px 6px", textAlign: "right", borderBottom: "0.5px solid #21262d", color: "#8b949e", fontWeight: 400, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
                         ))}
                       </tr>
@@ -932,6 +937,12 @@ export default function Dashboard() {
                     <tbody>
                       {eff.slice(-12).map(e => {
                         const rc = (v: number | null, good = 3, bad = 2) => v == null ? "#8b949e" : v >= good ? "#3fb950" : v < bad ? "#f85149" : "#c9d1d9";
+                        // Per-channel ROAS: flag implausible values (>cap) as a data error.
+                        const chRoas = (v: number | null) => {
+                          const bad = v != null && v > ROAS_CAP;
+                          return { t: v == null ? "—" : bad ? "⚠" : v.toFixed(2) + "×", c: bad ? "#f85149" : rc(v), err: bad };
+                        };
+                        const mR = chRoas(e.meta_roas), gR = chRoas(e.google_roas), aR = chRoas(e.azads_roas);
                         return (
                           <tr key={e.month} style={{ borderBottom: "0.5px solid #21262d" }}>
                             <td style={{ padding: "4px 6px", color: "#8b949e" }}>{e.month}</td>
@@ -939,9 +950,9 @@ export default function Dashboard() {
                             <td style={{ padding: "4px 6px", textAlign: "right" }}>{e.d2c_cac_order != null ? fmt(e.d2c_cac_order) : "—"}</td>
                             <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.d2c_roas) }}>{e.d2c_roas != null ? e.d2c_roas.toFixed(2) + "×" : "—"}</td>
                             <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.blended_roas) }}>{e.blended_roas != null ? e.blended_roas.toFixed(2) + "×" : "—"}</td>
-                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.meta_roas) }}>{e.meta_roas != null ? e.meta_roas.toFixed(2) + "×" : "—"}</td>
-                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.google_roas) }}>{e.google_roas != null ? e.google_roas.toFixed(2) + "×" : "—"}</td>
-                            <td style={{ padding: "4px 6px", textAlign: "right", color: rc(e.azads_roas) }}>{e.azads_roas != null ? e.azads_roas.toFixed(2) + "×" : "—"}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: mR.c }} title={mR.err ? "Implausible — likely a conversion-tracking error at source" : undefined}>{mR.t}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: gR.c }} title={gR.err ? "Implausible — likely a conversion-tracking error at source" : undefined}>{gR.t}</td>
+                            <td style={{ padding: "4px 6px", textAlign: "right", color: aR.c }} title={aR.err ? "Implausible — likely a conversion-tracking error at source" : undefined}>{aR.t}</td>
                           </tr>
                         );
                       })}
